@@ -524,7 +524,7 @@ public:
    void ComputeNearFarPlane(const Matrix3D &matWorldView, const float scale, float &zNear, float &zFar) const;
    static void ComputeNearFarPlane(const vector<Vertex3Ds> &bounds, const Matrix3D &matWorldView, const float scale, float &zNear, float &zFar);
 
-   bool RenderSolid() const { return m_renderSolid; }
+   bool RenderSolid() const; // always false without an editor: solid fill is an editor display mode, and parts fetch the fill color from the editor object
 
    static void InvokeBallBallCollisionCallback(const class HitBall *b1, const class HitBall *b2, float hitVelocity);
 

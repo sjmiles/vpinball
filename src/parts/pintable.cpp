@@ -82,6 +82,13 @@ static inline std::from_chars_result my_from_chars(const char* first, const char
 #define my_from_chars std::from_chars
 #endif
 
+bool PinTable::RenderSolid() const
+{
+   // solid fill is an editor display mode; several parts resolve the fill color through the
+   // editor object (m_vpinball->m_fillColor), so without an editor always render outlines
+   return m_renderSolid && g_pvp != nullptr;
+}
+
 PinTable::PinTable()
    : m_settings(&(g_app->m_settings))
    , m_undo(this)

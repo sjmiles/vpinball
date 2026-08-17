@@ -531,6 +531,9 @@ void Primitive::UIRenderPass2(Sur * const psur)
 
 void Primitive::RenderBlueprint(Sur *psur, const bool solid)
 {
+   RecalculateMatrices();
+   TransformVertices(); // don't rely on the editor view having already built the vertex cache (e.g. headless export)
+
    psur->SetFillColor(solid ? BLUEPRINT_SOLID_COLOR : -1);
    psur->SetLineColor(RGB(0, 0, 0), false, 1);
    psur->SetObject(this);
