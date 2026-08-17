@@ -52,6 +52,14 @@ public:
    void Execute() override;
 };
 
+class ExportDXFCommand : public TableBasedCommand
+{
+public:
+   explicit ExportDXFCommand(const std::filesystem::path& tableFilename);
+   ~ExportDXFCommand() override = default;
+   void Execute() override;
+};
+
 class PlayTableCommand : public TableBasedCommand
 {
 public:

@@ -40,6 +40,7 @@
 #include "ui/live/LiveUI.h"
 #include "ui/win/codeview.h"
 #include "ui/win/DragPointDialogs.h"
+#include "ui/win/dxfsur.h"
 #include "ui/win/hitsur.h"
 #include "ui/win/PinTableWnd.h"
 #include "ui/win/resource.h"
@@ -3326,6 +3327,15 @@ void PinTable::ExportTableMesh()
    loader.ExportEnd();
    m_vpinball->MessageBox("Export finished!", "Info", MB_OK | MB_ICONEXCLAMATION);
 #endif
+}
+
+bool PinTable::ExportDXF(const string &filename)
+{
+   DxfSur dsur(m_left, m_top, m_right, m_bottom);
+   for (const auto pedit : m_vedit)
+      if (pedit->m_uiVisible && pedit->GetISelect() && !pedit->m_desktopBackdrop) // playfield parts only, backdrop items are meaningless for CAM
+         pedit->GetISelect()->RenderBlueprint(&dsur, false);
+   return dsur.Save(filename);
 }
 
 // Import Point of View file. This can be either:

@@ -335,6 +335,7 @@ public:
    void Paste(const bool atLocation, const int x, const int y);
 
    void ExportTableMesh();
+   bool ExportDXF(const string &filename); // playfield geometry as DXF for CAD/CAM, see ui/win/dxfsur.h
    void ImportBackdropPOV(const std::filesystem::path &filename);
    void ExportBackdropPOV() const;
 

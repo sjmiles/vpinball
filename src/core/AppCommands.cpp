@@ -140,6 +140,24 @@ void ExportPOVCommand::Execute()
 }
 
 
+ExportDXFCommand::ExportDXFCommand(const std::filesystem::path& tableFilename)
+   : TableBasedCommand(tableFilename)
+{
+}
+
+void ExportDXFCommand::Execute()
+{
+   CComObject<PinTable>* table = LoadTable();
+   std::filesystem::path dxfFilename = m_tableFilename;
+   dxfFilename.replace_extension(".dxf");
+   if (table->ExportDXF(dxfFilename.string()))
+      std::cout << "Exported " << dxfFilename.string() << '\n';
+   else
+      std::cout << "DXF export of " << dxfFilename.string() << " failed\n";
+   table->Release();
+}
+
+
 PlayTableCommand::PlayTableCommand(const std::filesystem::path& tableFilename)
    : TableBasedCommand(tableFilename)
 {
@@ -302,6 +320,7 @@ enum option_names
    OPTION_POVEDIT,
    OPTION_POV,
    OPTION_EXTRACTVBS,
+   OPTION_EXPORT_DXF,
    OPTION_INI,
    OPTION_TABLE_INI,
    OPTION_TOURNAMENT,
@@ -350,6 +369,7 @@ static const CommandLineOption options[] = {
    { OPTION_POVEDIT, "PovEdit"s, "[filename]  Load and run file in live editing mode, then export new pov on exit"s },
    { OPTION_POV, "Pov"s, "[filename]  Load, export pov and close"s },
    { OPTION_EXTRACTVBS, "ExtractVBS"s, "[filename]  Load, export table script and close"s },
+   { OPTION_EXPORT_DXF, "ExportDXF"s, "[filename]  Load, export playfield geometry as DXF and close"s },
    { OPTION_INI, "Ini"s, "[filename]  Use a custom settings file instead of loading it from the default location"s },
    { OPTION_TABLE_INI, "TableIni"s, "[filename]  Use a custom table settings file. This option is only available in conjunction with a command which specifies a table filename like Play, Edit,..."s },
    { OPTION_TOURNAMENT, "TournamentFile"s, "[table filename] [tournament filename]  Load a table and tournament file and convert to .png"s },
@@ -636,6 +656,7 @@ void CommandLineProcessor::ProcessCommandLine(int nArgs, const char* szArglist[]
       case OPTION_AUDIT:
       case OPTION_POV:
       case OPTION_EXTRACTVBS:
+      case OPTION_EXPORT_DXF:
       #ifndef __STANDALONE__
          case OPTION_EDIT:
       #endif
@@ -667,6 +688,7 @@ void CommandLineProcessor::ProcessCommandLine(int nArgs, const char* szArglist[]
             case OPTION_AUDIT: commands.push_back(std::make_unique<AuditTableCommand>(tableFileName)); break;
             case OPTION_POV: commands.push_back(std::make_unique<ExportPOVCommand>(tableFileName)); break;
             case OPTION_EXTRACTVBS: commands.push_back(std::make_unique<ExportVBSCommand>(tableFileName)); break;
+            case OPTION_EXPORT_DXF: commands.push_back(std::make_unique<ExportDXFCommand>(tableFileName)); break;
             #ifndef __STANDALONE__
             case OPTION_EDIT: commands.push_back(std::make_unique<Win32EditCommand>(tableFileName)); break;
             #endif

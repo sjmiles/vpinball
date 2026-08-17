@@ -8,7 +8,6 @@
 #include "parts/Collection.h"
 #include "renderer/Texture.h"
 #include "ui/win/codeview.h"
-#include "ui/win/dxfsur.h"
 #include "ui/win/hitrectsur.h"
 #include "ui/win/hitsur.h"
 #include "ui/win/paintsur.h"
@@ -316,13 +315,7 @@ void PinTableWnd::ExportDXF()
    if (GetSaveFileName(&ofn) == 0)
       return;
 
-   DxfSur dsur(m_table->m_left, m_table->m_top, m_table->m_right, m_table->m_bottom);
-
-   for (const auto &ptr : m_table->GetParts())
-      if (ptr->m_uiVisible && ptr->GetISelect() && !ptr->m_desktopBackdrop) // playfield parts only, backdrop items are meaningless for CAM
-         ptr->GetISelect()->RenderBlueprint(&dsur, false);
-
-   if (dsur.Save(szDxfFileName))
+   if (m_table->ExportDXF(szDxfFileName))
       m_vpxEditor->MessageBox("Export finished!", "DXF Export", MB_OK);
    else
       m_vpxEditor->MessageBox("Export failed!", "DXF Export", MB_OK | MB_ICONEXCLAMATION);
