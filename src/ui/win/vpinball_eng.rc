@@ -2645,6 +2645,7 @@ BEGIN
         POPUP "Ex&port"
         BEGIN
             MENUITEM "&Blueprint",                  ID_FILE_EXPORT_BLUEPRINT
+            MENUITEM "&DXF (CNC)",                  ID_FILE_EXPORT_DXF
             MENUITEM "OBJ &Mesh",                   ID_EXPORT_TABLEMESH
             MENUITEM "&POV",                        ID_EXPORT_BACKDROPPOV
         END

@@ -775,6 +775,11 @@ bool WinEditor::ParseCommand(const size_t code, const bool notify)
          pt->ExportBlueprint();
       return true;
 
+   case ID_FILE_EXPORT_DXF:
+      if (const auto pt = GetActiveTableEditor(); pt)
+         pt->ExportDXF();
+      return true;
+
    case ID_EXPORT_TABLEMESH:
       if (CComObject<PinTable> *const ptCur = GetActiveTable(); ptCur)
          ptCur->ExportTableMesh();
@@ -1154,6 +1159,7 @@ void WinEditor::SetEnableMenuItems()
       mainMenu.EnableMenuItem(IDM_SAVE, enabled);
       mainMenu.EnableMenuItem(IDM_SAVEAS, enabled);
       mainMenu.EnableMenuItem(ID_FILE_EXPORT_BLUEPRINT, enabled);
+      mainMenu.EnableMenuItem(ID_FILE_EXPORT_DXF, enabled);
       mainMenu.EnableMenuItem(ID_EXPORT_TABLEMESH, enabled);
       mainMenu.EnableMenuItem(ID_EXPORT_BACKDROPPOV, enabled);
       mainMenu.EnableMenuItem(ID_IMPORT_BACKDROPPOV, ptCur->IsLocked() ? grayed : enabled);
@@ -1212,6 +1218,7 @@ void WinEditor::SetEnableMenuItems()
       mainMenu.EnableMenuItem(IDM_SAVE, grayed);
       mainMenu.EnableMenuItem(IDM_SAVEAS, grayed);
       mainMenu.EnableMenuItem(ID_FILE_EXPORT_BLUEPRINT, grayed);
+      mainMenu.EnableMenuItem(ID_FILE_EXPORT_DXF, grayed);
       mainMenu.EnableMenuItem(ID_EXPORT_TABLEMESH, grayed);
       mainMenu.EnableMenuItem(ID_EXPORT_BACKDROPPOV, grayed);
       mainMenu.EnableMenuItem(ID_IMPORT_BACKDROPPOV, grayed);

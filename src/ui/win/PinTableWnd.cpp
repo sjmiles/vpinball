@@ -8,6 +8,7 @@
 #include "parts/Collection.h"
 #include "renderer/Texture.h"
 #include "ui/win/codeview.h"
+#include "ui/win/dxfsur.h"
 #include "ui/win/hitrectsur.h"
 #include "ui/win/hitsur.h"
 #include "ui/win/paintsur.h"
@@ -291,6 +292,40 @@ void PinTableWnd::ExportBlueprint()
 #if 1
    FreeImage_Unload(dib);
 #endif
+#endif
+}
+
+void PinTableWnd::ExportDXF()
+{
+#ifndef __STANDALONE__
+   OPENFILENAME ofn = {};
+   ofn.lStructSize = sizeof(OPENFILENAME);
+   ofn.hInstance = g_app->GetInstanceHandle();
+   ofn.hwndOwner = m_vpxEditor->GetHwnd();
+   ofn.lpstrFilter = "DXF (.dxf)\0*.dxf;\0";
+   char szDxfFileName[MAXSTRING];
+   strncpy_s(szDxfFileName, std::size(szDxfFileName), m_table->m_filename.string().c_str());
+   const size_t idx = m_table->m_filename.string().find_last_of('.');
+   if (idx != string::npos && idx < MAXSTRING)
+      szDxfFileName[idx] = '\0';
+   ofn.lpstrFile = szDxfFileName;
+   ofn.nMaxFile = std::size(szDxfFileName);
+   ofn.lpstrDefExt = "dxf";
+   ofn.Flags = OFN_NOREADONLYRETURN | OFN_CREATEPROMPT | OFN_OVERWRITEPROMPT | OFN_EXPLORER;
+
+   if (GetSaveFileName(&ofn) == 0)
+      return;
+
+   DxfSur dsur(m_table->m_left, m_table->m_top, m_table->m_right, m_table->m_bottom);
+
+   for (const auto &ptr : m_table->GetParts())
+      if (ptr->m_uiVisible && ptr->GetISelect() && !ptr->m_desktopBackdrop) // playfield parts only, backdrop items are meaningless for CAM
+         ptr->GetISelect()->RenderBlueprint(&dsur, false);
+
+   if (dsur.Save(szDxfFileName))
+      m_vpxEditor->MessageBox("Export finished!", "DXF Export", MB_OK);
+   else
+      m_vpxEditor->MessageBox("Export failed!", "DXF Export", MB_OK | MB_ICONEXCLAMATION);
 #endif
 }
 

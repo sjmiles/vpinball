@@ -478,6 +478,8 @@ set(VPX_WINDOWS_SOURCES
 
    src/ui/win/DragPointDialogs.h
    src/ui/win/DragPointDialogs.cpp
+   src/ui/win/dxfsur.cpp
+   src/ui/win/dxfsur.h
    src/ui/win/paintsur.cpp
    src/ui/win/paintsur.h
    src/ui/win/worker.cpp

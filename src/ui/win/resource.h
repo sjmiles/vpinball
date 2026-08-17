@@ -924,6 +924,7 @@
 #define ID_TABLE_PLAY_CAMERA            32787
 #define IDC_PASTE                       32788
 #define ID_FILE_EXPORT_BLUEPRINT        32790
+#define ID_FILE_EXPORT_DXF              32791
 #define ID_TABLE_SOUNDMANAGER           32792
 #define ID_TABLE_IMAGEMANAGER           32793
 #define ID_EDIT_UNDO                    32794

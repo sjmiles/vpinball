@@ -32,6 +32,7 @@ public:
    void SetMyScrollInfo();
    POINT GetScreenPoint() const;
    void ExportBlueprint();
+   void ExportDXF();
    bool GetDisplayGrid() const;
    void SetDisplayGrid(const bool display);
    bool GetDisplayBackdrop() const;
