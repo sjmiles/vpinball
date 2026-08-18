@@ -133,7 +133,12 @@ void PinUndo::Undo(bool discard)
          {
             if (pie->GetIRenderable())
                g_pplayer->m_renderer->ReinitRenderable(pie->GetIRenderable());
-            g_pplayer->m_physics->Update(pie);
+            // AsyncDynamicQuadTree::Update requires a hitable, dynamic part - anything else
+            // fails its asserts and crashes release builds. Only selected parts are dynamic
+            // (see EditorUI selection handling); static parts self-heal on next selection,
+            // since SetDynamic rebuilds their colliders from the restored state.
+            if (pie->GetIHitable() != nullptr && pie->GetItemType() != eItemBall && !g_pplayer->m_physics->IsStatic(pie))
+               g_pplayer->m_physics->Update(pie);
          }
       }
 
@@ -187,7 +192,6 @@ UndoRecord::~UndoRecord()
 
 void UndoRecord::MarkForUndo(IEditable *const pie, const bool saveForUndo)
 {
-#ifndef __STANDALONE__
    if (FindIndexOf(m_vieMark, pie) != -1) // Been marked already
       return;
 
@@ -206,7 +210,6 @@ void UndoRecord::MarkForUndo(IEditable *const pie, const bool saveForUndo)
    pie->Save(writer, true);
 
    m_vstm.push_back(pstm);
-#endif
 }
 
 void UndoRecord::MarkForCreate(IEditable *const pie)

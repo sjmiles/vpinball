@@ -21,6 +21,7 @@ public:
    void SetDynamic(IEditable *editable) { GetUIQuadTree()->SetDynamic(editable); }
    void Update(IEditable *editable) { GetUIQuadTree()->Update(editable); }
    void SetStatic(IEditable *editable) { GetUIQuadTree()->SetStatic(editable); }
+   bool IsStatic(IEditable *editable) { return GetUIQuadTree()->IsStatic(editable); }
 
    // Allow to add/remove parts after initial setup
    void Remove(IEditable *editable);
