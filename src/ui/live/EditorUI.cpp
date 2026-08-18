@@ -107,6 +107,7 @@ void EditorUI::Open()
    m_isOpened = true;
    if (!IsInspectMode())
       m_view2D.m_show = true; // table authoring session: open the 2D CAD view alongside the 3D scene
+
    ResetCameraFromPlayer();
    m_player->SetPlayState(false);
    m_renderer->DisableStaticPrePass(true);
@@ -141,6 +142,34 @@ void EditorUI::Render3D()
 
 void EditorUI::RenderUI()
 {
+   static bool s_undoSelftestPending = getenv("VPX_UNDO_SELFTEST") != nullptr; // deterministic undo regression check, logs PASS/FAIL
+   if (s_undoSelftestPending)
+   {
+      s_undoSelftestPending = false;
+      for (const auto &edit : m_table->GetParts())
+      {
+         if (edit->GetItemType() != eItemSurface)
+            continue;
+         auto *const surf = static_cast<Surface *>(edit);
+         if (surf->m_vdpoint.empty())
+            continue;
+         DragPoint *const dp = surf->m_vdpoint[0];
+         const float origX = dp->m_v.x, origY = dp->m_v.y;
+         PushUndo(edit, 0xBEEF);
+         dp->m_v.x += 100.f;
+         dp->m_v.y += 100.f;
+         const bool moved = (dp->m_v.x != origX);
+         m_lastUndoPart = nullptr;
+         m_lastUndoId = 0;
+         m_table->m_undo.Undo();
+         // the undo reload rebuilds m_vdpoint with new DragPoint objects; re-fetch
+         const DragPoint *const dpAfter = surf->m_vdpoint.empty() ? nullptr : surf->m_vdpoint[0];
+         const bool restored = dpAfter != nullptr && (dpAfter->m_v.x == origX && dpAfter->m_v.y == origY);
+         PLOGI << "UNDO-SELFTEST: part=" << edit->GetName() << " moved=" << moved << " restored=" << restored << (restored ? " PASS" : " FAIL");
+         break;
+      }
+   }
+
    const ImGuiIO &io = ImGui::GetIO();
    ImGuizmo::SetOrthographic(m_camMode == ViewMode::DesktopBackdrop || (m_camMode == ViewMode::EditorCam && !m_perspectiveCam));
    ImGuizmo::BeginFrame();
@@ -353,7 +382,8 @@ void EditorUI::RenderUI()
                const auto it = std::ranges::find_if(m_editables, [edit](const auto &uiPart) { return uiPart->GetEditable() == edit; });
                if (it != m_editables.end())
                   m_selection = Selection(*it);
-            });
+            },
+            [this](IEditable *part, unsigned int undoId) { PushUndo(part, undoId); });
       }
    }
 
@@ -617,7 +647,10 @@ void EditorUI::RenderUI()
          }
       }
    }
-   if (!io.WantCaptureKeyboard)
+   // gate on text input rather than keyboard capture: capture is set whenever any ImGui
+   // window has focus (e.g. after clicking in the 2D CAD view), which made every editor
+   // shortcut - including undo - go dead until the user clicked the 3D scene again
+   if (!io.WantTextInput)
    {
       if (ImGui::IsKeyReleased(ImGuiKey_Escape))
       {

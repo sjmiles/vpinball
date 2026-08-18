@@ -4,6 +4,13 @@
 #include "View2D.h"
 
 #include "parts/pintable.h"
+#include "parts/dragpoint.h"
+#include "parts/flasher.h"
+#include "parts/light.h"
+#include "parts/ramp.h"
+#include "parts/rubber.h"
+#include "parts/surface.h"
+#include "parts/trigger.h"
 #include "ui/win/sur.h"
 
 #include "imgui/imgui.h"
@@ -13,6 +20,24 @@ namespace VPX::EditorUI
 
 namespace
 {
+
+// the parts whose outline is a drag point chain; IEditable and IHaveDragPoints are
+// unrelated bases, so the cross-cast goes through the concrete part type
+IHaveDragPoints *GetDragPoints(IEditable *edit)
+{
+   if (edit == nullptr)
+      return nullptr;
+   switch (edit->GetItemType())
+   {
+   case eItemSurface: return static_cast<Surface *>(edit);
+   case eItemRamp: return static_cast<Ramp *>(edit);
+   case eItemRubber: return static_cast<Rubber *>(edit);
+   case eItemLight: return static_cast<Light *>(edit);
+   case eItemTrigger: return static_cast<Trigger *>(edit);
+   case eItemFlasher: return static_cast<Flasher *>(edit);
+   default: return nullptr;
+   }
+}
 
 // Draws the blueprint geometry stream (see Sur) into an ImGui draw list, and
 // doubles as the picker: every stroke it draws is also distance-tested against
@@ -199,7 +224,8 @@ private:
 
 } // anonymous namespace
 
-void View2D::Render(PinTable *table, float dpi, PropertyPane::Unit lengthUnit, IEditable *selected, const std::function<void(IEditable *)> &onSelect)
+void View2D::Render(PinTable *table, float dpi, PropertyPane::Unit lengthUnit, IEditable *selected, const std::function<void(IEditable *)> &onSelect,
+   const std::function<void(IEditable *, unsigned int)> &pushUndo)
 {
    if (table == nullptr)
       return;
@@ -226,6 +252,13 @@ void View2D::Render(PinTable *table, float dpi, PropertyPane::Unit lengthUnit, I
    ImGui::InputFloat("H\"", &m_boardHeight, 0.f, 0.f, "%.3f");
    ImGui::SameLine();
    ImGui::TextDisabled("board");
+   ImGui::SameLine();
+   ImGui::Checkbox("Snap", &m_snap);
+   ImGui::SameLine();
+   ImGui::SetNextItemWidth(60.f * dpi);
+   ImGui::InputFloat("##snapstep", &m_snapStep, 0.f, 0.f, "%.4f");
+   if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Snap step in inches (0.0625 = 1/16\")");
 
    ImDrawList *const dl = ImGui::GetWindowDrawList();
    const ImVec2 canvasPos = ImGui::GetCursorScreenPos();
@@ -241,11 +274,68 @@ void View2D::Render(PinTable *table, float dpi, PropertyPane::Unit lengthUnit, I
    }
 
    // input: pan with left/middle drag, zoom on wheel centered at the cursor,
-   // plain left-click (no drag) selects
+   // plain left-click (no drag) selects, left-drag on a handle moves that drag point
    ImGui::InvisibleButton("view2d_canvas", avail, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle);
    const bool hovered = ImGui::IsItemHovered();
    ImGuiIO &io = ImGui::GetIO();
-   if (ImGui::IsItemActive() && (ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.f) || ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0.f)))
+
+   const auto toScreen = [&](float wx, float wy) -> ImVec2 { return { viewCenter.x + (wx - m_center.x) * m_zoom, viewCenter.y - (wy - m_center.y) * m_zoom }; };
+   const auto pointToWorld = [&](const DragPoint *dp) -> Vertex2D { return { (dp->m_v.x - table->m_left) * S, (table->m_bottom - dp->m_v.y) * S }; };
+
+   // drag point handles of the selected part
+   IHaveDragPoints *const dragPts = GetDragPoints(selected);
+   int hoverHandle = -1;
+   if (dragPts != nullptr && hovered)
+   {
+      const float handleRadius = 7.f * dpi;
+      float best = handleRadius * handleRadius;
+      for (int i = 0; i < (int)dragPts->m_vdpoint.size(); ++i)
+      {
+         const DragPoint *const dp = dragPts->m_vdpoint[i];
+         if (dp->m_uiLocked)
+            continue;
+         const Vertex2D w = pointToWorld(dp);
+         const ImVec2 hp = toScreen(w.x, w.y);
+         const float distSq = (io.MousePos.x - hp.x) * (io.MousePos.x - hp.x) + (io.MousePos.y - hp.y) * (io.MousePos.y - hp.y);
+         if (distSq < best)
+         {
+            best = distSq;
+            hoverHandle = i;
+         }
+      }
+   }
+   if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hoverHandle >= 0)
+      m_dragPointIndex = hoverHandle;
+
+   bool draggedPointThisClick = false;
+   if (m_dragPointIndex >= 0)
+   {
+      if (dragPts == nullptr || m_dragPointIndex >= (int)dragPts->m_vdpoint.size())
+         m_dragPointIndex = -1;
+      else if (!ImGui::IsMouseDown(ImGuiMouseButton_Left) || !ImGui::IsItemActive())
+      {
+         // also drop the drag if the canvas lost active state (focus loss, lost release event),
+         // otherwise the point stays glued to the cursor
+         m_dragPointIndex = -1;
+         draggedPointThisClick = true; // release frame: don't treat it as a select click
+      }
+      else if (pushUndo)
+      {
+         pushUndo(selected, 0x2000u + (unsigned int)m_dragPointIndex); // deduped by the host for the duration of the drag
+         float wx = m_center.x + (io.MousePos.x - viewCenter.x) / m_zoom;
+         float wy = m_center.y - (io.MousePos.y - viewCenter.y) / m_zoom;
+         if (m_snap && m_snapStep > 1e-4f)
+         {
+            wx = roundf(wx / m_snapStep) * m_snapStep;
+            wy = roundf(wy / m_snapStep) * m_snapStep;
+         }
+         DragPoint *const dp = dragPts->m_vdpoint[m_dragPointIndex];
+         dp->m_v.x = wx / S + table->m_left;
+         dp->m_v.y = table->m_bottom - wy / S;
+      }
+   }
+
+   if (m_dragPointIndex < 0 && ImGui::IsItemActive() && (ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.f) || ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0.f)))
    {
       m_center.x -= io.MouseDelta.x / m_zoom;
       m_center.y += io.MouseDelta.y / m_zoom;
@@ -262,8 +352,6 @@ void View2D::Render(PinTable *table, float dpi, PropertyPane::Unit lengthUnit, I
 
    dl->PushClipRect(canvasPos, ImVec2(canvasPos.x + avail.x, canvasPos.y + avail.y), true);
    dl->AddRectFilled(canvasPos, ImVec2(canvasPos.x + avail.x, canvasPos.y + avail.y), IM_COL32(24, 26, 30, 255));
-
-   const auto toScreen = [&](float wx, float wy) -> ImVec2 { return { viewCenter.x + (wx - m_center.x) * m_zoom, viewCenter.y - (wy - m_center.y) * m_zoom }; };
 
    // unit grid (inch-based; the metric skin only changes the readout)
    const float wxMin = m_center.x - avail.x * 0.5f / m_zoom, wxMax = m_center.x + avail.x * 0.5f / m_zoom;
@@ -296,9 +384,38 @@ void View2D::Render(PinTable *table, float dpi, PropertyPane::Unit lengthUnit, I
       hit = sur.GetHit();
    }
 
-   if (hovered && hit != nullptr && hit != selected)
+   // drag point handles on top of the geometry: circles for smooth points, squares for corners
+   if (dragPts != nullptr)
+   {
+      const float hs = 4.f * dpi;
+      for (int i = 0; i < (int)dragPts->m_vdpoint.size(); ++i)
+      {
+         const DragPoint *const dp = dragPts->m_vdpoint[i];
+         const Vertex2D w = pointToWorld(dp);
+         const ImVec2 hp = toScreen(w.x, w.y);
+         const bool active = (i == m_dragPointIndex);
+         const ImU32 col = active ? IM_COL32(255, 180, 60, 255) : (i == hoverHandle) ? IM_COL32(255, 255, 255, 255) : dp->m_uiLocked ? IM_COL32(140, 140, 140, 130) : IM_COL32(120, 200, 255, 230);
+         if (dp->m_smooth)
+         {
+            if (active)
+               dl->AddCircleFilled(hp, hs, col);
+            else
+               dl->AddCircle(hp, hs, col, 0, 1.5f);
+         }
+         else
+         {
+            const ImVec2 a { hp.x - hs, hp.y - hs }, b { hp.x + hs, hp.y + hs };
+            if (active)
+               dl->AddRectFilled(a, b, col);
+            else
+               dl->AddRect(a, b, col, 0.f, 0, 1.5f);
+         }
+      }
+   }
+
+   if (hovered && hit != nullptr && hit != selected && hoverHandle < 0)
       ImGui::SetTooltip("%s", hit->GetName().c_str());
-   if (hovered && ImGui::IsMouseReleased(ImGuiMouseButton_Left) && io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Left] < 9.f && onSelect)
+   if (hovered && ImGui::IsMouseReleased(ImGuiMouseButton_Left) && io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Left] < 9.f && !draggedPointThisClick && hoverHandle < 0 && onSelect)
       onSelect(hit); // nullptr clears the selection
 
    // cursor crosshair + readout
@@ -306,12 +423,20 @@ void View2D::Render(PinTable *table, float dpi, PropertyPane::Unit lengthUnit, I
    {
       dl->AddLine(toScreen(mouseWorld.x, wyMin), toScreen(mouseWorld.x, wyMax), IM_COL32(255, 255, 255, 30));
       dl->AddLine(toScreen(wxMin, mouseWorld.y), toScreen(wxMax, mouseWorld.y), IM_COL32(255, 255, 255, 30));
+      // while dragging a point, read out the (snapped) point position instead of the cursor
+      Vertex2D readout = mouseWorld;
+      const char *label = "";
+      if (m_dragPointIndex >= 0 && dragPts != nullptr && m_dragPointIndex < (int)dragPts->m_vdpoint.size())
+      {
+         readout = pointToWorld(dragPts->m_vdpoint[m_dragPointIndex]);
+         label = "  [pt]";
+      }
       char buf[96];
       switch (lengthUnit)
       {
-      case PropertyPane::Unit::Millimeters: snprintf(buf, sizeof(buf), "x %.2f  y %.2f mm", mouseWorld.x * 25.4f, mouseWorld.y * 25.4f); break;
-      case PropertyPane::Unit::VPLength: snprintf(buf, sizeof(buf), "x %.1f  y %.1f vpu", mouseWorld.x / S + table->m_left, table->m_bottom - mouseWorld.y / S); break;
-      default: snprintf(buf, sizeof(buf), "x %.3f  y %.3f in", mouseWorld.x, mouseWorld.y); break;
+      case PropertyPane::Unit::Millimeters: snprintf(buf, sizeof(buf), "x %.2f  y %.2f mm%s", readout.x * 25.4f, readout.y * 25.4f, label); break;
+      case PropertyPane::Unit::VPLength: snprintf(buf, sizeof(buf), "x %.1f  y %.1f vpu%s", readout.x / S + table->m_left, table->m_bottom - readout.y / S, label); break;
+      default: snprintf(buf, sizeof(buf), "x %.3f  y %.3f in%s", readout.x, readout.y, label); break;
       }
       dl->AddRectFilled(ImVec2(canvasPos.x + 4.f, canvasPos.y + avail.y - 22.f * dpi), ImVec2(canvasPos.x + 190.f * dpi, canvasPos.y + avail.y - 4.f), IM_COL32(0, 0, 0, 160));
       dl->AddText(ImVec2(canvasPos.x + 8.f, canvasPos.y + avail.y - 20.f * dpi), IM_COL32(240, 240, 240, 255), buf);
