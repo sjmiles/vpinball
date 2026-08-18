@@ -111,7 +111,8 @@ public:
    virtual int GetSelectLevel() const { return 1; }
    virtual bool LoadMeshDialog() { return false; }
    virtual void ExportMeshDialog() {}
-   virtual void AddPoint(int x, int y, const bool smooth) {}
+   virtual void AddPoint(int x, int y, const bool smooth) {} // editor window coordinates
+   virtual void AddPointAt(const Vertex2D &v, const bool smooth) {} // table coordinates
    virtual void UpdateStatusBarInfo();
 
    virtual bool IsUILocked() const = 0;

@@ -47,6 +47,8 @@ private:
 
    // drag point editing
    int m_dragPointIndex = -1; // index into the selected part's drag points while dragging
+   int m_ctxPointIndex = -1; // point the context menu is open on
+   Vertex2D m_ctxWorld { 0.f, 0.f }; // world position of an outline right-click (for Add Point)
    bool m_snap = true;
    float m_snapStep = 0.0625f; // inches (1/16")
 

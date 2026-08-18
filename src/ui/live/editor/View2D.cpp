@@ -426,6 +426,91 @@ void View2D::Render(PinTable *table, float dpi, PropertyPane::Unit lengthUnit, I
    if (hovered && ImGui::IsMouseReleased(ImGuiMouseButton_Left) && io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Left] < 9.f && !draggedPointThisClick && hoverHandle < 0 && onSelect)
       onSelect(hit); // nullptr clears the selection
 
+   // double-click on a handle toggles the smooth flag
+   if (hovered && hoverHandle >= 0 && dragPts != nullptr && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+   {
+      if (pushUndo)
+         pushUndo(selected, 0x3000u + (unsigned int)hoverHandle);
+      DragPoint *const dp = dragPts->m_vdpoint[hoverHandle];
+      dp->m_smooth = !dp->m_smooth;
+      m_dragPointIndex = -1; // the double-click's second press also started a drag; cancel it
+   }
+
+   // right-click: context menu on a handle, or Add Point on the selected outline
+   if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+   {
+      if (dragPts != nullptr && hoverHandle >= 0)
+      {
+         m_ctxPointIndex = hoverHandle;
+         ImGui::OpenPopup("view2d_point_ctx");
+      }
+      else if (dragPts != nullptr && hit == selected)
+      {
+         m_ctxWorld = mouseWorld;
+         ImGui::OpenPopup("view2d_outline_ctx");
+      }
+   }
+   if (ImGui::BeginPopup("view2d_point_ctx"))
+   {
+      if (dragPts == nullptr || m_ctxPointIndex < 0 || m_ctxPointIndex >= (int)dragPts->m_vdpoint.size())
+         ImGui::CloseCurrentPopup();
+      else
+      {
+         DragPoint *const dp = dragPts->m_vdpoint[m_ctxPointIndex];
+         bool smooth = dp->m_smooth;
+         if (ImGui::Checkbox("Smooth", &smooth))
+         {
+            if (pushUndo)
+               pushUndo(selected, 0x3000u + (unsigned int)m_ctxPointIndex);
+            dp->m_smooth = smooth;
+         }
+         // numeric entry: inches/mm are board-anchored y-up (like the cursor readout),
+         // VP Units show the raw stored coordinates (y down)
+         const bool nativeUnits = (lengthUnit == PropertyPane::Unit::VPLength);
+         const Vertex2D w = pointToWorld(dp);
+         const float unitScale = (lengthUnit == PropertyPane::Unit::Millimeters) ? 25.4f : 1.f;
+         const char *const fmt = nativeUnits ? "%.1f vpu" : (lengthUnit == PropertyPane::Unit::Millimeters) ? "%.2f mm" : "%.3f\"";
+         float ex = nativeUnits ? dp->m_v.x : w.x * unitScale;
+         float ey = nativeUnits ? dp->m_v.y : w.y * unitScale;
+         bool changed = false;
+         ImGui::SetNextItemWidth(90.f * dpi);
+         changed |= ImGui::InputFloat("X", &ex, 0.f, 0.f, fmt, ImGuiInputTextFlags_EnterReturnsTrue);
+         ImGui::SetNextItemWidth(90.f * dpi);
+         changed |= ImGui::InputFloat("Y", &ey, 0.f, 0.f, fmt, ImGuiInputTextFlags_EnterReturnsTrue);
+         if (changed)
+         {
+            if (pushUndo)
+               pushUndo(selected, 0x4000u + (unsigned int)m_ctxPointIndex);
+            dp->m_v.x = nativeUnits ? ex : (ex / unitScale) / S + table->m_left;
+            dp->m_v.y = nativeUnits ? ey : table->m_bottom - (ey / unitScale) / S;
+         }
+         ImGui::Separator();
+         ImGui::BeginDisabled((int)dragPts->m_vdpoint.size() <= dragPts->GetMinimumPoints());
+         if (ImGui::MenuItem("Delete Point"))
+         {
+            dp->Delete(); // guards the minimum point count and registers its own undo
+            m_dragPointIndex = -1;
+            m_ctxPointIndex = -1;
+            ImGui::CloseCurrentPopup();
+         }
+         ImGui::EndDisabled();
+      }
+      ImGui::EndPopup();
+   }
+   if (ImGui::BeginPopup("view2d_outline_ctx"))
+   {
+      if (dragPts == nullptr)
+         ImGui::CloseCurrentPopup();
+      else if (ImGui::MenuItem("Add Point"))
+      {
+         // AddPointAt registers its own undo; new points are corners, matching the Win32 editor default
+         selected->GetISelect()->AddPointAt(Vertex2D { m_ctxWorld.x / S + table->m_left, table->m_bottom - m_ctxWorld.y / S }, false);
+         m_dragPointIndex = -1;
+         ImGui::CloseCurrentPopup();
+      }
+      ImGui::EndPopup();
+   }
+
    // cursor crosshair + readout
    if (hovered)
    {

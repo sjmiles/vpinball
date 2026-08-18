@@ -132,6 +132,7 @@ public:
 #endif
 
    void AddPoint(int x, int y, const bool smooth) final;
+   void AddPointAt(const Vertex2D &v, const bool smooth) final;
 
 protected:
    Renderer *m_renderer = nullptr;

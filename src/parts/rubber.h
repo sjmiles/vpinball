@@ -106,6 +106,7 @@ public:
    void Scale(const float scalex, const float scaley, const Vertex2D& pvCenter, const bool useElementCenter) final;
    void Translate(const Vertex2D &pvOffset) final;
    void AddPoint(int x, int y, const bool smooth) final;
+   void AddPointAt(const Vertex2D &v, const bool smooth) final;
 
    Vertex2D GetCenter() const final { return GetPointCenter(); }
    void PutCenter(const Vertex2D& pv) final { PutPointCenter(pv); }
