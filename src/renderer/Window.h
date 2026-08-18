@@ -52,7 +52,10 @@ private:
 class Window final
 {
 public:
-   Window(const string& title, const Settings& settings, VPXWindowId windowId); // OS Window
+   // OS Window. decorated forces windowed mode with native decorations (title bar,
+   // close/minimize/zoom, resizable) regardless of the configured window mode - used
+   // for authoring sessions which should behave like a normal desktop application.
+   Window(const string& title, const Settings& settings, VPXWindowId windowId, bool decorated = false);
    Window(const int width, const int height); // VR Output
    ~Window();
 
