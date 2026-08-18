@@ -70,13 +70,18 @@ Window::Window(const int width, const int height)
    m_backBuffer = nullptr;
 }
 
-Window::Window(const string& title, const Settings& settings, VPXWindowId windowId)
+Window::Window(const string& title, const Settings& settings, VPXWindowId windowId, bool decorated)
    : m_windowId(windowId)
    , m_isVR(false)
 {
    m_windowMode = (WindowMode) settings.GetWindow_FullScreen(m_windowId);
    if (g_isMobile)
+   {
       m_windowMode = WindowMode::BorderlessFullscreen;
+      decorated = false;
+   }
+   if (decorated)
+      m_windowMode = WindowMode::Windowed;
    
    // Both fullscreen and windowed modes are anchored to a user selected display
    const string configuredDisplay = settings.GetWindow_Display((int)m_windowId);
@@ -144,6 +149,13 @@ Window::Window(const string& title, const Settings& settings, VPXWindowId window
       {
          m_width = static_cast<int>(roundf(static_cast<float>(settings.GetWindow_Width(m_windowId)) / selectedDisplay.videomode.pixelDensity));
          m_height = static_cast<int>(roundf(static_cast<float>(settings.GetWindow_Height(m_windowId)) / selectedDisplay.videomode.pixelDensity));
+         // a decorated window configured at (or beyond) full display size would sit under the
+         // OS decorations; scale it down so the title bar stays reachable
+         if (decorated && (m_width >= selectedDisplay.videomode.width || m_height >= selectedDisplay.videomode.height))
+         {
+            m_width = (selectedDisplay.videomode.width * 88) / 100;
+            m_height = (selectedDisplay.videomode.height * 88) / 100;
+         }
       }
 
       // Constrain window to screen
@@ -198,7 +210,7 @@ Window::Window(const string& title, const Settings& settings, VPXWindowId window
    }
    else
    {
-      uint32_t wnd_flags = SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+      uint32_t wnd_flags = (decorated ? SDL_WINDOW_RESIZABLE : SDL_WINDOW_BORDERLESS) | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
       // So far, the only way to get a clean focus management on all platforms with fullscreen/windowed mode
       // is to make ancillary windows (backglass, score view, topper) output only. They must never grab input
       // focus, otherwise showing them (eventually lazily, when the script starts feeding them content) would

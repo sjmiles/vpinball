@@ -315,7 +315,8 @@ Player::Player(PinTable *const table, const PlayMode playMode)
       }
       else
       {
-         m_playfieldWnd = new VPX::Window("Visual Pinball Player"s, settings, VPXWindowId::VPXWINDOW_Playfield);
+         const bool authoring = (playMode == PlayMode::FullEdit);
+         m_playfieldWnd = new VPX::Window(authoring ? "Visual Pinball Editor"s : "Visual Pinball Player"s, settings, VPXWindowId::VPXWINDOW_Playfield, authoring);
 
          const float pfRefreshRate = m_playfieldWnd->GetRefreshRate();
          m_maxFramerate = m_ptable->m_settings.GetPlayer_MaxFramerate();

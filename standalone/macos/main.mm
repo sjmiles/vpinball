@@ -1,6 +1,9 @@
 #import <Cocoa/Cocoa.h>
 #include <csignal>
 
+#include <SDL3/SDL_events.h>
+#include <SDL3/SDL_init.h>
+
 extern "C" char** g_argv;
 extern "C" int g_argc;
 extern "C" int WinMain(void*, void*, void*, int);
@@ -18,8 +21,82 @@ void OnSignalHandler(int signum)
 
 @implementation VPXAppDelegate
 
+// Route quit requests (menu items, Cmd+Q, dock quit) through SDL so the app shuts
+// down cleanly via its normal close path; before SDL is up, plain exit is fine.
+- (void)requestQuit:(id)sender
+{
+  if (SDL_WasInit(SDL_INIT_VIDEO)) {
+    SDL_Event ev;
+    SDL_zero(ev);
+    ev.type = SDL_EVENT_QUIT;
+    SDL_PushEvent(&ev);
+  } else {
+    exit(0);
+  }
+}
+
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender
+{
+  if (SDL_WasInit(SDL_INIT_VIDEO)) {
+    [self requestQuit:sender];
+    return NSTerminateCancel;
+  }
+  return NSTerminateNow;
+}
+
+- (void)buildMenuBar
+{
+  NSMenu* menubar = [[NSMenu alloc] init];
+  NSString* appName = [[NSProcessInfo processInfo] processName];
+
+  NSMenuItem* appMenuItem = [[NSMenuItem alloc] init];
+  [menubar addItem:appMenuItem];
+  NSMenu* appMenu = [[NSMenu alloc] init];
+  [appMenu addItemWithTitle:[@"About " stringByAppendingString:appName]
+                     action:@selector(orderFrontStandardAboutPanel:)
+              keyEquivalent:@""];
+  [appMenu addItem:[NSMenuItem separatorItem]];
+  [appMenu addItemWithTitle:[@"Hide " stringByAppendingString:appName]
+                     action:@selector(hide:)
+              keyEquivalent:@"h"];
+  NSMenuItem* hideOthers = [[NSMenuItem alloc] initWithTitle:@"Hide Others"
+                                                      action:@selector(hideOtherApplications:)
+                                               keyEquivalent:@"h"];
+  hideOthers.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
+  [appMenu addItem:hideOthers];
+  [appMenu addItem:[NSMenuItem separatorItem]];
+  NSMenuItem* quitItem = [[NSMenuItem alloc] initWithTitle:[@"Quit " stringByAppendingString:appName]
+                                                    action:@selector(requestQuit:)
+                                             keyEquivalent:@"q"];
+  quitItem.target = self;
+  [appMenu addItem:quitItem];
+  appMenuItem.submenu = appMenu;
+
+  NSMenuItem* fileMenuItem = [[NSMenuItem alloc] init];
+  [menubar addItem:fileMenuItem];
+  NSMenu* fileMenu = [[NSMenu alloc] initWithTitle:@"File"];
+  NSMenuItem* exitItem = [[NSMenuItem alloc] initWithTitle:@"Exit"
+                                                    action:@selector(requestQuit:)
+                                             keyEquivalent:@""];
+  exitItem.target = self;
+  [fileMenu addItem:exitItem];
+  fileMenuItem.submenu = fileMenu;
+
+  NSMenuItem* windowMenuItem = [[NSMenuItem alloc] init];
+  [menubar addItem:windowMenuItem];
+  NSMenu* windowMenu = [[NSMenu alloc] initWithTitle:@"Window"];
+  [windowMenu addItemWithTitle:@"Minimize" action:@selector(performMiniaturize:) keyEquivalent:@"m"];
+  [windowMenu addItemWithTitle:@"Zoom" action:@selector(performZoom:) keyEquivalent:@""];
+  windowMenuItem.submenu = windowMenu;
+  [NSApp setWindowsMenu:windowMenu];
+
+  [NSApp setMainMenu:menubar];
+}
+
 - (void)applicationDidFinishLaunching:(NSNotification*)notification
 {
+  [self buildMenuBar];
+
   if (g_argc == 1) {
 
     NSOpenPanel* panel = [NSOpenPanel openPanel];
