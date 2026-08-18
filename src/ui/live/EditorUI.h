@@ -7,6 +7,7 @@
 #include "imguizmo/ImGuizmo.h"
 #include "imgui_markdown/imgui_markdown.h"
 #include "editor/EditableUIPart.h"
+#include "editor/View2D.h"
 #include "renderer/Renderer.h"
 
 class LiveUI;
@@ -174,6 +175,7 @@ private:
    {
       VPX, Metric, Imperial
    } m_units = Units::VPX;
+   View2D m_view2D;
 
    // 3D editor
    ImGuizmo::OPERATION m_gizmoOperation = ImGuizmo::NONE;

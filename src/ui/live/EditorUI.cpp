@@ -174,6 +174,11 @@ void EditorUI::RenderUI()
                m_player->SetCloseState(Player::CS_CLOSE_APP);
             ImGui::EndMenu();
          }
+         if (ImGui::BeginMenu("View"))
+         {
+            ImGui::MenuItem("2D CAD View", nullptr, &m_view2D.m_show);
+            ImGui::EndMenu();
+         }
          if (IsInspectMode() && !m_table->IsLocked() && ImGui::BeginMenu("Debug"))
          {
             if (ImGui::MenuItem("Open debugger"))
@@ -329,6 +334,10 @@ void EditorUI::RenderUI()
       // Side panels
       UpdateOutlinerUI();
       UpdatePropertyUI();
+
+      if (m_view2D.m_show)
+         m_view2D.Render(m_table, m_liveUI.GetDPI(),
+            m_units == Units::Metric ? PropertyPane::Unit::Millimeters : m_units == Units::Imperial ? PropertyPane::Unit::Inches : PropertyPane::Unit::VPLength);
    }
 
    if (m_showRendererInspection)
