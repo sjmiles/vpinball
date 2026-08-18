@@ -14,23 +14,31 @@ namespace VPX::EditorUI
 namespace
 {
 
-// Draws the blueprint geometry stream (see Sur) into an ImGui draw list.
+// Draws the blueprint geometry stream (see Sur) into an ImGui draw list, and
+// doubles as the picker: every stroke it draws is also distance-tested against
+// the mouse, so picking always agrees with the picture.
 // Input coordinates are VPX units (y down); output is screen pixels through a
 // board-anchored inch world space (y up), so the on-screen picture matches the
 // DXF export and the physical board.
 class ImGuiSur final : public Sur
 {
 public:
-   ImGuiSur(ImDrawList *drawList, const PinTable *table, const ImVec2 &viewCenter, const Vertex2D &worldCenter, float zoom)
+   ImGuiSur(ImDrawList *drawList, const PinTable *table, const ImVec2 &viewCenter, const Vertex2D &worldCenter, float zoom, const ImVec2 &mouse, const IEditable *selected)
       : Sur(nullptr, 1.f, 0.f, 0.f, 0, 0)
       , m_drawList(drawList)
       , m_viewCenter(viewCenter)
       , m_worldCenter(worldCenter)
       , m_pxPerInch(zoom)
+      , m_mouse(mouse)
+      , m_selected(selected)
    {
       m_tableLeft = table->m_left;
       m_tableBottom = table->m_bottom;
    }
+
+   static constexpr float PICK_RADIUS_PX = 8.f;
+
+   IEditable *GetHit() const { return m_hit; }
 
    ImVec2 P(const float x, const float y) const // VPX units -> screen
    {
@@ -39,24 +47,35 @@ public:
       return { m_viewCenter.x + (wx - m_worldCenter.x) * m_pxPerInch, m_viewCenter.y - (wy - m_worldCenter.y) * m_pxPerInch };
    }
 
-   void Line(const float x, const float y, const float x2, const float y2) override { m_drawList->AddLine(P(x, y), P(x2, y2), StrokeColor()); }
+   void Line(const float x, const float y, const float x2, const float y2) override
+   {
+      const ImVec2 a = P(x, y), b = P(x2, y2);
+      m_drawList->AddLine(a, b, StrokeColor(), StrokeWidth());
+      Consider(DistSqToSegment(m_mouse, a, b));
+   }
 
    void Rectangle(const float x, const float y, const float x2, float y2) override
    {
       const ImVec2 pts[4] = { P(x, y), P(x2, y), P(x2, y2), P(x, y2) };
-      m_drawList->AddPolyline(pts, 4, StrokeColor(), ImDrawFlags_Closed, 1.f);
+      m_drawList->AddPolyline(pts, 4, StrokeColor(), ImDrawFlags_Closed, StrokeWidth());
+      for (int i = 0; i < 4; ++i)
+         Consider(DistSqToSegment(m_mouse, pts[i], pts[(i + 1) & 3]));
    }
 
    void Rectangle2(const int x, const int y, const int x2, const int y2) override { } // screen-space UI decoration
 
    void Ellipse(const float centerx, const float centery, const float radius) override
    {
-      m_drawList->AddCircle(P(centerx, centery), radius * (float)VPUTOINCHES(1.) * m_pxPerInch, StrokeColor());
+      const ImVec2 c = P(centerx, centery);
+      const float r = radius * (float)VPUTOINCHES(1.) * m_pxPerInch;
+      m_drawList->AddCircle(c, r, StrokeColor(), 0, StrokeWidth());
+      const float d = fabsf(sqrtf((m_mouse.x - c.x) * (m_mouse.x - c.x) + (m_mouse.y - c.y) * (m_mouse.y - c.y)) - r);
+      Consider(d * d);
    }
 
    void Ellipse2(const float centerx, const float centery, const int radius) override
    {
-      m_drawList->AddCircle(P(centerx, centery), (float)radius, StrokeColor()); // pixel radius (drag point style handles)
+      m_drawList->AddCircle(P(centerx, centery), (float)radius, StrokeColor(), 0, StrokeWidth()); // pixel radius (drag point style handles)
    }
 
    void Polygon(const Vertex2D *const rgv, const int count) override { Poly(rgv, count, true); }
@@ -73,7 +92,7 @@ public:
    void Lines(const Vertex2D *const rgv, const int count) override
    {
       for (int i = 0; i + 1 < count; i += 2)
-         m_drawList->AddLine(P(rgv[i].x, rgv[i].y), P(rgv[i + 1].x, rgv[i + 1].y), StrokeColor());
+         Line(rgv[i].x, rgv[i].y, rgv[i + 1].x, rgv[i + 1].y);
    }
 
    void Arc(const float x, const float y, const float radius, const float pt1x, const float pt1y, const float pt2x, const float pt2y) override
@@ -90,12 +109,32 @@ public:
       if (a1 < a2)
          a2 -= 2.f * (float)M_PI;
       m_drawList->PathArcTo(c, r, a2, a1);
-      m_drawList->PathStroke(StrokeColor(), 0, 1.f);
+      m_drawList->PathStroke(StrokeColor(), 0, StrokeWidth());
+
+      float am = atan2f(m_mouse.y - c.y, m_mouse.x - c.x);
+      while (am < a2)
+         am += 2.f * (float)M_PI;
+      if (am <= a1) // mouse angle inside the swept range: distance to the ring
+      {
+         const float d = fabsf(sqrtf((m_mouse.x - c.x) * (m_mouse.x - c.x) + (m_mouse.y - c.y) * (m_mouse.y - c.y)) - r);
+         Consider(d * d);
+      }
+      else // outside: distance to the arc end points
+      {
+         Consider((m_mouse.x - p1.x) * (m_mouse.x - p1.x) + (m_mouse.y - p1.y) * (m_mouse.y - p1.y));
+         Consider((m_mouse.x - p2.x) * (m_mouse.x - p2.x) + (m_mouse.y - p2.y) * (m_mouse.y - p2.y));
+      }
    }
 
    void Image(const float x, const float y, const float x2, const float y2, HDC hdcSrc, const int width, const int height) override { } // raster content
 
-   void SetObject(ISelect *const psel) override { } // selection comes in a later stage
+   void SetObject(ISelect *const psel) override
+   {
+      // parts announce themselves then often call SetObject(nullptr) before drawing,
+      // so keep the last non-null object current (same convention as DxfSur)
+      if (psel != nullptr)
+         m_curEditable = psel->GetIEditable();
+   }
 
    void SetFillColor(const int rgb) override { }
    void SetBorderColor(const int rgb, const bool dashed, const int width) override { m_dashed = dashed; }
@@ -109,23 +148,58 @@ private:
       m_points.resize(count);
       for (int i = 0; i < count; ++i)
          m_points[i] = P(rgv[i].x, rgv[i].y);
-      m_drawList->AddPolyline(m_points.data(), count, StrokeColor(), closed ? ImDrawFlags_Closed : ImDrawFlags_None, 1.f);
+      m_drawList->AddPolyline(m_points.data(), count, StrokeColor(), closed ? ImDrawFlags_Closed : ImDrawFlags_None, StrokeWidth());
+      for (int i = 0; i + 1 < count; ++i)
+         Consider(DistSqToSegment(m_mouse, m_points[i], m_points[i + 1]));
+      if (closed)
+         Consider(DistSqToSegment(m_mouse, m_points[count - 1], m_points[0]));
    }
 
-   ImU32 StrokeColor() const { return m_dashed ? IM_COL32(210, 215, 220, 80) : IM_COL32(210, 215, 220, 220); }
+   static float DistSqToSegment(const ImVec2 &p, const ImVec2 &a, const ImVec2 &b)
+   {
+      const float abx = b.x - a.x, aby = b.y - a.y;
+      const float lenSq = abx * abx + aby * aby;
+      float t = lenSq > 0.f ? ((p.x - a.x) * abx + (p.y - a.y) * aby) / lenSq : 0.f;
+      t = clamp(t, 0.f, 1.f);
+      const float dx = p.x - (a.x + t * abx), dy = p.y - (a.y + t * aby);
+      return dx * dx + dy * dy;
+   }
+
+   void Consider(const float distSq)
+   {
+      if (m_curEditable != nullptr && distSq < m_bestDistSq)
+      {
+         m_bestDistSq = distSq;
+         m_hit = m_curEditable;
+      }
+   }
+
+   bool IsSelected() const { return m_selected != nullptr && m_curEditable == m_selected; }
+   ImU32 StrokeColor() const
+   {
+      if (IsSelected())
+         return m_dashed ? IM_COL32(255, 180, 60, 130) : IM_COL32(255, 180, 60, 255);
+      return m_dashed ? IM_COL32(210, 215, 220, 80) : IM_COL32(210, 215, 220, 220);
+   }
+   float StrokeWidth() const { return IsSelected() ? 2.f : 1.f; }
 
    ImDrawList *const m_drawList;
    const ImVec2 m_viewCenter;
    const Vertex2D m_worldCenter;
    const float m_pxPerInch;
+   const ImVec2 m_mouse;
+   const IEditable *const m_selected;
    float m_tableLeft, m_tableBottom;
    bool m_dashed = false;
+   IEditable *m_curEditable = nullptr;
+   IEditable *m_hit = nullptr;
+   float m_bestDistSq = PICK_RADIUS_PX * PICK_RADIUS_PX;
    vector<ImVec2> m_points;
 };
 
 } // anonymous namespace
 
-void View2D::Render(PinTable *table, float dpi, PropertyPane::Unit lengthUnit)
+void View2D::Render(PinTable *table, float dpi, PropertyPane::Unit lengthUnit, IEditable *selected, const std::function<void(IEditable *)> &onSelect)
 {
    if (table == nullptr)
       return;
@@ -166,7 +240,8 @@ void View2D::Render(PinTable *table, float dpi, PropertyPane::Unit lengthUnit)
       m_center = { canvasW * 0.5f, canvasH * 0.5f };
    }
 
-   // input: pan with left/middle drag, zoom on wheel centered at the cursor
+   // input: pan with left/middle drag, zoom on wheel centered at the cursor,
+   // plain left-click (no drag) selects
    ImGui::InvisibleButton("view2d_canvas", avail, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle);
    const bool hovered = ImGui::IsItemHovered();
    ImGuiIO &io = ImGui::GetIO();
@@ -211,13 +286,20 @@ void View2D::Render(PinTable *table, float dpi, PropertyPane::Unit lengthUnit)
    dl->AddRect(toScreen(0.f, 0.f), toScreen(canvasW, canvasH), IM_COL32(110, 150, 255, 110));
    dl->AddRect(toScreen(0.f, 0.f), toScreen(m_boardWidth, m_boardHeight), IM_COL32(255, 180, 60, 200));
 
-   // table geometry, same stream as the DXF export
+   // table geometry, same stream as the DXF export; the drawing pass doubles as the picker
+   IEditable *hit = nullptr;
    {
-      ImGuiSur sur(dl, table, viewCenter, m_center, m_zoom);
+      ImGuiSur sur(dl, table, viewCenter, m_center, m_zoom, io.MousePos, selected);
       for (const auto &pedit : table->GetParts())
          if (pedit->m_uiVisible && pedit->GetISelect() && !pedit->m_desktopBackdrop)
             pedit->GetISelect()->RenderBlueprint(&sur, false);
+      hit = sur.GetHit();
    }
+
+   if (hovered && hit != nullptr && hit != selected)
+      ImGui::SetTooltip("%s", hit->GetName().c_str());
+   if (hovered && ImGui::IsMouseReleased(ImGuiMouseButton_Left) && io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Left] < 9.f && onSelect)
+      onSelect(hit); // nullptr clears the selection
 
    // cursor crosshair + readout
    if (hovered)

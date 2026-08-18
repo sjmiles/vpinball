@@ -336,8 +336,23 @@ void EditorUI::RenderUI()
       UpdatePropertyUI();
 
       if (m_view2D.m_show)
+      {
+         IEditable *const selected2D = (m_selection.type == Selection::S_EDITABLE && m_selection.uiPart) ? m_selection.uiPart->GetEditable() : nullptr;
          m_view2D.Render(m_table, m_liveUI.GetDPI(),
-            m_units == Units::Metric ? PropertyPane::Unit::Millimeters : m_units == Units::Imperial ? PropertyPane::Unit::Inches : PropertyPane::Unit::VPLength);
+            m_units == Units::Metric ? PropertyPane::Unit::Millimeters : m_units == Units::Imperial ? PropertyPane::Unit::Inches : PropertyPane::Unit::VPLength,
+            selected2D,
+            [this](IEditable *edit)
+            {
+               if (edit == nullptr)
+               {
+                  m_selection = Selection();
+                  return;
+               }
+               const auto it = std::ranges::find_if(m_editables, [edit](const auto &uiPart) { return uiPart->GetEditable() == edit; });
+               if (it != m_editables.end())
+                  m_selection = Selection(*it);
+            });
+      }
    }
 
    if (m_showRendererInspection)

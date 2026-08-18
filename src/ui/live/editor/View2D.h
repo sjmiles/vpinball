@@ -2,24 +2,31 @@
 
 #pragma once
 
+#include <functional>
+
 #include "PropertyPane.h"
 
 class PinTable;
+class IEditable;
 
 namespace VPX::EditorUI
 {
 
 // 2D top-down "CAD view" of the table: true-scale rendering of the same blueprint
 // geometry stream that feeds the DXF export (see ui/win/dxfsur.h), with pan/zoom,
-// a unit grid, cursor readout, and a physical-board overlay. View only for now.
+// a unit grid, cursor readout, and a physical-board overlay.
 //
 // World coordinates are board-anchored inches, y-up, origin at the canvas
 // bottom-left corner - matching the DXF export and CAM conventions, not the
 // VPX-internal y-down unit space.
+//
+// Left-click picks the part whose drawn outline is nearest the cursor (within a
+// few pixels) and reports it through onSelect, so the host can route it to the
+// property panes; left/middle-drag pans; wheel zooms at the cursor.
 class View2D final
 {
 public:
-   void Render(PinTable *table, float dpi, PropertyPane::Unit lengthUnit);
+   void Render(PinTable *table, float dpi, PropertyPane::Unit lengthUnit, IEditable *selected, const std::function<void(IEditable *)> &onSelect);
 
    bool m_show = false;
 
