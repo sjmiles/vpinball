@@ -105,6 +105,8 @@ void EditorUI::Open()
    if (m_isOpened)
       return;
    m_isOpened = true;
+   if (!IsInspectMode())
+      m_view2D.m_show = true; // table authoring session: open the 2D CAD view alongside the 3D scene
    ResetCameraFromPlayer();
    m_player->SetPlayState(false);
    m_renderer->DisableStaticPrePass(true);
@@ -627,6 +629,12 @@ void EditorUI::RenderUI()
       else if (ImGui::IsKeyPressed(ImGuiKey_F))
       {
          m_flyMode = !m_flyMode;
+      }
+      else if (ImGui::IsKeyPressed(ImGuiKey_F2))
+      {
+         // shortcut matters: on macOS the fullscreen player window extends under the
+         // system menu bar, which hides ImGui's main menu bar (and this toggle's menu item)
+         m_view2D.m_show = !m_view2D.m_show;
       }
       else if (ImGui::IsKeyPressed(ImGuiKey_A))
       {
