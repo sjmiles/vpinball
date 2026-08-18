@@ -234,8 +234,16 @@ void View2D::Render(PinTable *table, float dpi, PropertyPane::Unit lengthUnit, I
    const float canvasW = (table->m_right - table->m_left) * S;
    const float canvasH = (table->m_bottom - table->m_top) * S;
 
-   ImGui::SetNextWindowSize(ImVec2(420.f * dpi, 700.f * dpi), ImGuiCond_FirstUseEver);
-   if (!ImGui::Begin("2D CAD View", &m_show, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
+   ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+   if (m_docked)
+   {
+      ImGui::SetNextWindowPos(m_dockPos);
+      ImGui::SetNextWindowSize(m_dockSize);
+      windowFlags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBringToFrontOnFocus;
+   }
+   else
+      ImGui::SetNextWindowSize(ImVec2(420.f * dpi, 700.f * dpi), ImGuiCond_FirstUseEver);
+   if (!ImGui::Begin("2D CAD View", m_docked ? nullptr : &m_show, windowFlags))
    {
       ImGui::End();
       return;

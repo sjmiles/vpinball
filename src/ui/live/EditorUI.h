@@ -176,6 +176,7 @@ private:
       VPX, Metric, Imperial
    } m_units = Units::VPX;
    View2D m_view2D;
+   bool m_cadMode = false; // 2D-first authoring: 3D scene hidden, 2D CAD view docked between the panels
 
    // 3D editor
    ImGuizmo::OPERATION m_gizmoOperation = ImGuizmo::NONE;

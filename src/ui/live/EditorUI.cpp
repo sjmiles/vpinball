@@ -106,7 +106,11 @@ void EditorUI::Open()
       return;
    m_isOpened = true;
    if (!IsInspectMode())
-      m_view2D.m_show = true; // table authoring session: open the 2D CAD view alongside the 3D scene
+   {
+      // table authoring session: open 2D-first (CAD mode); F3 brings the 3D scene back
+      m_view2D.m_show = true;
+      m_cadMode = true;
+   }
 
    ResetCameraFromPlayer();
    m_player->SetPlayState(false);
@@ -130,6 +134,8 @@ void EditorUI::ResetCameraFromPlayer()
 
 void EditorUI::Render3D()
 {
+   if (m_cadMode)
+      return; // 3D overlays are meaningless while the scene is hidden
    UpdateEditableList();
    RenderContext ctx(m_player, nullptr, m_camMode, m_shadeMode, (m_table->m_liveBaseTable != nullptr) && m_player->IsPlaying());
    for (const auto &uiPart : m_editables)
@@ -171,6 +177,15 @@ void EditorUI::RenderUI()
    }
 
    const ImGuiIO &io = ImGui::GetIO();
+
+   if (m_cadMode)
+   {
+      // opaque backdrop hiding the 3D scene, painted behind every ImGui window; scene
+      // mouse interaction is separately gated on m_cadMode
+      const ImGuiViewport *const vp = ImGui::GetMainViewport();
+      ImGui::GetBackgroundDrawList()->AddRectFilled(vp->Pos, ImVec2(vp->Pos.x + vp->Size.x, vp->Pos.y + vp->Size.y), IM_COL32(28, 30, 34, 255));
+   }
+
    ImGuizmo::SetOrthographic(m_camMode == ViewMode::DesktopBackdrop || (m_camMode == ViewMode::EditorCam && !m_perspectiveCam));
    ImGuizmo::BeginFrame();
    ImGuizmo::SetRect(0, 0, io.DisplaySize.x, io.DisplaySize.y);
@@ -207,7 +222,14 @@ void EditorUI::RenderUI()
          }
          if (ImGui::BeginMenu("View"))
          {
-            ImGui::MenuItem("2D CAD View", nullptr, &m_view2D.m_show);
+            if (ImGui::MenuItem("CAD Mode", "F3", &m_cadMode) && m_cadMode)
+            {
+               m_view2D.m_show = true;
+               m_view2D.RequestFit();
+            }
+            ImGui::BeginDisabled(m_cadMode);
+            ImGui::MenuItem("2D CAD View", "F2", &m_view2D.m_show);
+            ImGui::EndDisabled();
             ImGui::EndMenu();
          }
          if (IsInspectMode() && !m_table->IsLocked() && ImGui::BeginMenu("Debug"))
@@ -326,7 +348,10 @@ void EditorUI::RenderUI()
       }
       ImGui::End();
 
-      // Overlay Info Text
+      // Overlay Info Text (camera and gizmo modes are 3D concepts, and the docked 2D view
+      // owns this corner in CAD mode)
+      if (!m_cadMode)
+      {
       ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x - 200.f * m_liveUI.GetDPI(),
          io.DisplaySize.y - m_toolbar_height - m_menubar_height - 5.f * m_liveUI.GetDPI())); // Fixed outliner width (to be adjusted when moving ImGui to the docking branch)
       ImGui::SetNextWindowPos(ImVec2(200.f * m_liveUI.GetDPI(), m_toolbar_height + m_menubar_height + 5.f * m_liveUI.GetDPI()));
@@ -361,6 +386,7 @@ void EditorUI::RenderUI()
       default: break;
       }
       ImGui::End();
+      }
 
       // Side panels
       UpdateOutlinerUI();
@@ -368,6 +394,16 @@ void EditorUI::RenderUI()
 
       if (m_view2D.m_show)
       {
+         m_view2D.m_docked = m_cadMode;
+         if (m_cadMode)
+         {
+            const ImGuiViewport *const vp = ImGui::GetMainViewport();
+            const float left = m_table->IsLocked() ? 0.f : 200.f * m_liveUI.GetDPI(); // outliner width
+            const float right = m_table->IsLocked() ? 0.f : 280.f * m_liveUI.GetDPI(); // properties width
+            const float top = m_menubar_height + m_toolbar_height;
+            m_view2D.m_dockPos = ImVec2(vp->Pos.x + left, vp->Pos.y + top);
+            m_view2D.m_dockSize = ImVec2(vp->Size.x - left - right, vp->Size.y - top);
+         }
          IEditable *const selected2D = (m_selection.type == Selection::S_EDITABLE && m_selection.uiPart) ? m_selection.uiPart->GetEditable() : nullptr;
          m_view2D.Render(m_table, m_liveUI.GetDPI(),
             m_units == Units::Metric ? PropertyPane::Unit::Millimeters : m_units == Units::Imperial ? PropertyPane::Unit::Inches : PropertyPane::Unit::VPLength,
@@ -501,7 +537,7 @@ void EditorUI::RenderUI()
    }
 
    // Handle uncaught mouse & keyboard shortcuts
-   if (!io.WantCaptureMouse)
+   if (!m_cadMode && !io.WantCaptureMouse) // in CAD mode the 3D scene is hidden - never route mouse input to it
    {
       // Zoom in/out with mouse wheel
       if (io.MouseWheel != 0)
@@ -667,7 +703,17 @@ void EditorUI::RenderUI()
       {
          // shortcut matters: on macOS the fullscreen player window extends under the
          // system menu bar, which hides ImGui's main menu bar (and this toggle's menu item)
-         m_view2D.m_show = !m_view2D.m_show;
+         if (!m_cadMode)
+            m_view2D.m_show = !m_view2D.m_show;
+      }
+      else if (ImGui::IsKeyPressed(ImGuiKey_F3))
+      {
+         m_cadMode = !m_cadMode;
+         if (m_cadMode)
+         {
+            m_view2D.m_show = true;
+            m_view2D.RequestFit();
+         }
       }
       else if (ImGui::IsKeyPressed(ImGuiKey_A))
       {

@@ -34,7 +34,12 @@ public:
    void Render(PinTable *table, float dpi, PropertyPane::Unit lengthUnit, IEditable *selected, const std::function<void(IEditable *)> &onSelect,
       const std::function<void(IEditable *, unsigned int)> &pushUndo);
 
+   void RequestFit() { m_zoom = 0.f; }
+
    bool m_show = false;
+   // when docked (CAD mode) the window is pinned to the given rect and cannot be closed or moved
+   bool m_docked = false;
+   ImVec2 m_dockPos { 0.f, 0.f }, m_dockSize { 0.f, 0.f };
 
 private:
    float m_zoom = 0.f; // pixels per world inch; <= 0 requests fit-to-window
