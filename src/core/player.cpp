@@ -1483,6 +1483,8 @@ void Player::ProcessOSMessages(const bool isInitialized)
       switch (e.type)
       {
       case SDL_EVENT_QUIT:
+         if (m_liveUI && m_liveUI->RequestEditorClose()) // may ask about unsaved changes first
+            break;
          SetCloseState(Player::CloseState::CS_STOP_PLAY);
          break;
 
@@ -1494,6 +1496,8 @@ void Player::ProcessOSMessages(const bool isInitialized)
 
       case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
          isPFWnd = (SDL_GetWindowFromID(e.window.windowID) == m_playfieldWnd->GetCore()) || IsVR();
+         if (m_liveUI && m_liveUI->RequestEditorClose()) // may ask about unsaved changes first
+            break;
          SetCloseState(Player::CloseState::CS_STOP_PLAY);
          break;
 

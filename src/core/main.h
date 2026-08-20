@@ -103,6 +103,8 @@ using std::wstring;
 
    #define sscanf_s sscanf
 
+   inline size_t strnlen_s(const char* const str, const size_t numberOfElements) { return str ? strnlen(str, numberOfElements) : 0; }
+
    #ifndef __MINGW32__
       #define localtime_s(x, y) localtime_r(y, x)
       #define gmtime_s(x, y) gmtime_r(y, x)

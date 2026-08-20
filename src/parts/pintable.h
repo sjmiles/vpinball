@@ -336,6 +336,12 @@ public:
 
    void ExportTableMesh();
    bool ExportDXF(const string &filename); // playfield geometry as DXF for CAD/CAM, see ui/win/dxfsur.h
+
+   // Native editor save format: the editable model as JSON in a project directory. Cheap to
+   // write, diffable, and portable - unlike .vpx, whose compound file container can only be
+   // written by the Windows build. Building a .vpx from a project is a separate step.
+   std::filesystem::path GetProjectPath() const;
+   bool SaveProject(const std::filesystem::path &dir);
    void ImportBackdropPOV(const std::filesystem::path &filename);
    void ExportBackdropPOV() const;
 

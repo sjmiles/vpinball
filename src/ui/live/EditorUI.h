@@ -26,6 +26,10 @@ public:
    ~EditorUI();
 
    void Open();
+   // Native project save, and the unsaved changes guard shared by every quit path
+   bool SaveProject();
+   void RequestClose(); // asks about unsaved changes, then closes
+   bool ConsumeCloseRequest(); // true if a close was requested and is not blocked by the guard
    bool IsOpened() const { return m_isOpened; }
    void Render3D();
    void RenderUI();
@@ -177,6 +181,8 @@ private:
    } m_units = Units::VPX;
    View2D m_view2D;
    bool m_cadMode = false; // 2D-first authoring: 3D scene hidden, 2D CAD view docked between the panels
+   bool m_showUnsavedChangesModal = false;
+   bool m_closeRequested = false;
 
    // 3D editor
    ImGuizmo::OPERATION m_gizmoOperation = ImGuizmo::NONE;

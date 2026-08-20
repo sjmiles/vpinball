@@ -29,6 +29,15 @@ public:
 
    void OpenEditorUI() { m_editorUI.Open(); }
    bool IsEditorUIOpened() const { return m_editorUI.IsOpened(); }
+   // Lets the editor guard OS initiated quits (window close, Cmd+Q, dock quit) so unsaved
+   // changes can be confirmed. Returns true when the editor takes over the request.
+   bool RequestEditorClose()
+   {
+      if (!m_editorUI.IsOpened() || m_editorUI.IsInspectMode())
+         return false;
+      m_editorUI.RequestClose();
+      return true;
+   }
    bool IsEditorViewMode() const { return m_editorUI.IsOpened() && !m_editorUI.IsPreview(); }
 
    void OpenInGameUI(const string& page = "homepage"s);

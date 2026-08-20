@@ -117,6 +117,27 @@ void EditorUI::Open()
    m_renderer->DisableStaticPrePass(true);
 }
 
+bool EditorUI::SaveProject()
+{
+   return m_table->SaveProject(m_table->GetProjectPath());
+}
+
+void EditorUI::RequestClose()
+{
+   // in inspection mode the edits belong to the live table, not the file: nothing to save
+   if (!IsInspectMode() && m_table->FDirty())
+      m_showUnsavedChangesModal = true;
+   else
+      m_closeRequested = true;
+}
+
+bool EditorUI::ConsumeCloseRequest()
+{
+   const bool close = m_closeRequested;
+   m_closeRequested = false;
+   return close;
+}
+
 void EditorUI::Close()
 {
    if (!m_isOpened)
@@ -213,11 +234,21 @@ void EditorUI::RenderUI()
       {
          if (!IsInspectMode() && ImGui::BeginMenu("File"))
          {
-            if (ImGui::MenuItem("Save"))
+            if (ImGui::MenuItem("Save Project", "Ctrl+S"))
+               SaveProject();
+            #ifndef __STANDALONE__
+            if (ImGui::MenuItem("Save .vpx"))
                m_table->Save();
+            #else
+            ImGui::BeginDisabled(true);
+            ImGui::MenuItem("Save .vpx");
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+               ImGui::SetTooltip("Writing .vpx is only supported by the Windows build.\nBuild one from the saved project instead.");
+            #endif
             ImGui::Separator();
             if (ImGui::MenuItem("Quit"))
-               m_player->SetCloseState(Player::CS_CLOSE_APP);
+               RequestClose();
             ImGui::EndMenu();
          }
          if (ImGui::BeginMenu("View"))
@@ -257,7 +288,12 @@ void EditorUI::RenderUI()
                ImGui::SetTooltip("Get back to player");
          }
          if (ImGui::Button(ICON_FK_WINDOW_CLOSE))
-            m_table->QuitPlayer(IsInspectMode() ? Player::CS_STOP_PLAY : Player::CS_CLOSE_APP);
+         {
+            if (IsInspectMode())
+               m_table->QuitPlayer(Player::CS_STOP_PLAY);
+            else
+               RequestClose();
+         }
          if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Close editor");
          m_menubar_height = ImGui::GetWindowSize().y;
@@ -422,6 +458,39 @@ void EditorUI::RenderUI()
             [this](IEditable *part, unsigned int undoId) { PushUndo(part, undoId); });
       }
    }
+
+   if (m_showUnsavedChangesModal)
+   {
+      ImGui::OpenPopup("Unsaved Changes");
+      m_showUnsavedChangesModal = false;
+   }
+   ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+   if (ImGui::BeginPopupModal("Unsaved Changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+   {
+      ImGui::TextUnformatted("This table has unsaved changes.");
+      ImGui::Spacing();
+      ImGui::TextDisabled("%s", m_table->GetProjectPath().filename().string().c_str());
+      ImGui::Spacing();
+      if (ImGui::Button("Save", ImVec2(110.f * m_liveUI.GetDPI(), 0.f)))
+      {
+         if (SaveProject())
+            m_closeRequested = true;
+         ImGui::CloseCurrentPopup();
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("Discard", ImVec2(110.f * m_liveUI.GetDPI(), 0.f)))
+      {
+         m_closeRequested = true;
+         ImGui::CloseCurrentPopup();
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("Cancel", ImVec2(110.f * m_liveUI.GetDPI(), 0.f)) || ImGui::IsKeyPressed(ImGuiKey_Escape))
+         ImGui::CloseCurrentPopup();
+      ImGui::EndPopup();
+   }
+
+   if (ConsumeCloseRequest())
+      m_table->QuitPlayer(Player::CS_CLOSE_APP);
 
    if (m_showRendererInspection)
       UpdateRendererInspectionModal();
@@ -705,6 +774,10 @@ void EditorUI::RenderUI()
          // system menu bar, which hides ImGui's main menu bar (and this toggle's menu item)
          if (!m_cadMode)
             m_view2D.m_show = !m_view2D.m_show;
+      }
+      else if (ImGui::IsKeyPressed(ImGuiKey_S) && io.KeyCtrl && !IsInspectMode())
+      {
+         SaveProject();
       }
       else if (ImGui::IsKeyPressed(ImGuiKey_F3))
       {

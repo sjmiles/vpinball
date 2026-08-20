@@ -46,6 +46,7 @@
 #include "ui/win/resource.h"
 #include "ui/win/WinEditor.h"
 #include "utils/BiffReader.h"
+#include "utils/JsonWriter.h"
 #include "utils/BiffWriter.h"
 #include "utils/hash.h"
 #include "utils/objloader.h"
@@ -1218,7 +1219,6 @@ HRESULT PinTable::LoadCustomInfo(IStorage* pstg, IStream *pstmTags, HCRYPTHASH h
 
 void PinTable::Save(IObjectWriter& writer, const bool saveForUndo)
 {
-#ifndef __STANDALONE__
    writer.WriteFloat(FID(LEFT), m_left);
    writer.WriteFloat(FID(TOPX), m_top);
    writer.WriteFloat(FID(RGHT), m_right);
@@ -1399,7 +1399,6 @@ void PinTable::Save(IObjectWriter& writer, const bool saveForUndo)
 
    writer.WriteInt(FID(TLCK), m_tablelocked);
    writer.EndObject();
-#endif
 }
 
 HRESULT PinTable::LoadGameFromFilename(const std::filesystem::path &filename)
@@ -3334,6 +3333,98 @@ void PinTable::ExportTableMesh()
    loader.ExportEnd();
    m_vpinball->MessageBox("Export finished!", "Info", MB_OK | MB_ICONEXCLAMATION);
 #endif
+}
+
+std::filesystem::path PinTable::GetProjectPath() const
+{
+   std::filesystem::path dir = m_filename;
+   dir.replace_extension();
+   dir += ".vpxproj";
+   return dir;
+}
+
+bool PinTable::SaveProject(const std::filesystem::path &dir)
+{
+   static const auto sanitize = [](const string &name)
+   {
+      string out;
+      for (const char c : name)
+         out += (isalnum((unsigned char)c) || c == '-' || c == '_') ? c : '_';
+      return out.empty() ? "unnamed"s : out;
+   };
+
+   std::error_code ec;
+   std::filesystem::create_directories(dir / "parts", ec);
+   if (ec)
+   {
+      PLOGE << "Could not create project directory " << dir.string() << ": " << ec.message();
+      return false;
+    }
+
+   bool ok = true;
+
+   { // the table itself
+      std::ofstream file(dir / "table.json");
+      JsonWriter writer(file);
+      Save(writer, false);
+      ok &= file.good() && !writer.HasError();
+   }
+
+   // one file per part, index prefixed to preserve table order
+   int index = 0;
+   vector<string> partFiles;
+   for (IEditable *const pedit : m_vedit)
+   {
+      const string typeName = pedit->GetISelect() ? MakeString(pedit->GetISelect()->GetTypeNameForType(pedit->GetItemType())) : "Part"s;
+      char prefix[8];
+      snprintf(prefix, sizeof(prefix), "%04d", index);
+      const string filename = string(prefix) + '_' + sanitize(typeName) + '_' + sanitize(pedit->GetName()) + ".json";
+
+      std::ofstream file(dir / "parts" / filename);
+      JsonWriter writer(file);
+      pedit->Save(writer, false);
+      ok &= file.good() && !writer.HasError();
+
+      partFiles.push_back(filename);
+      index++;
+   }
+
+   { // manifest
+      time_t now;
+      time(&now);
+      tm local;
+      localtime_s(&local, &now);
+      char when[64];
+      strftime(when, sizeof(when), "%Y-%m-%dT%H:%M:%S", &local);
+
+      std::ofstream file(dir / "project.json");
+      file << "{\n";
+      file << "  \"format\": \"vpx-editor-project\",\n";
+      file << "  \"formatVersion\": 1,\n";
+      file << "  \"fileFormatVersion\": " << CURRENT_FILE_FORMAT_VERSION << ",\n";
+      file << "  \"savedAt\": \"" << when << "\",\n";
+      // images, sounds and fonts are not part of the editable model and are not copied: the
+      // source table stays the asset baseline when a .vpx is built from this project
+      file << "  \"assetSource\": \"" << m_filename.filename().string() << "\",\n";
+      file << "  \"partCount\": " << partFiles.size() << ",\n";
+      file << "  \"parts\": [\n";
+      for (size_t i = 0; i < partFiles.size(); i++)
+         file << "    \"parts/" << partFiles[i] << '"' << (i + 1 < partFiles.size() ? "," : "") << '\n';
+      file << "  ]\n";
+      file << "}\n";
+      ok &= file.good();
+   }
+
+   if (ok)
+   {
+      m_undo.SetCleanPoint(eSaveClean);
+      SetNonUndoableDirty(eSaveClean);
+      PLOGI << "Saved project " << dir.string() << " (" << partFiles.size() << " parts)";
+   }
+   else
+      PLOGE << "Failed to write project " << dir.string();
+
+   return ok;
 }
 
 bool PinTable::ExportDXF(const string &filename)
