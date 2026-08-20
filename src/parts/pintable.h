@@ -345,6 +345,11 @@ public:
    // Applies a saved project over this (already loaded) table: the .vpx supplies images,
    // sounds and fonts, the project supplies the editable model.
    bool LoadProject(const std::filesystem::path &dir);
+   // Writes the editable geometry back into a vpxtool source tree (<id>_src), which is the
+   // source of truth; the .vpx is only ever an output built from it by vpxtool assemble.
+   // Returns false and reports if parts could not be matched to files.
+   bool SaveToSrc(const std::filesystem::path &srcDir);
+   static std::filesystem::path FindSrcTree(const std::filesystem::path &tableFilename);
    void ImportBackdropPOV(const std::filesystem::path &filename);
    void ExportBackdropPOV() const;
 

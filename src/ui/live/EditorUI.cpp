@@ -119,6 +119,10 @@ void EditorUI::Open()
 
 bool EditorUI::SaveProject()
 {
+   // the source tree is the source of truth; the .vpx is only a build output
+   if (const std::filesystem::path srcDir = m_srcDir.empty() ? PinTable::FindSrcTree(m_table->m_filename) : m_srcDir; !srcDir.empty())
+      return m_table->SaveToSrc(srcDir);
+   PLOGW << "No source tree found for " << m_table->m_filename.string() << ", saving a standalone project instead";
    return m_table->SaveProject(m_table->GetProjectPath());
 }
 
@@ -234,7 +238,7 @@ void EditorUI::RenderUI()
       {
          if (!IsInspectMode() && ImGui::BeginMenu("File"))
          {
-            if (ImGui::MenuItem("Save Project", "Ctrl+S"))
+            if (ImGui::MenuItem("Save to Source", "Ctrl+S"))
                SaveProject();
             #ifndef __STANDALONE__
             if (ImGui::MenuItem("Save .vpx"))

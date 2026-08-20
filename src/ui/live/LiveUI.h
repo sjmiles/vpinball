@@ -28,6 +28,7 @@ public:
    void HideUI();
 
    void OpenEditorUI() { m_editorUI.Open(); }
+   void SetEditorSrcDir(const std::filesystem::path &dir) { m_editorUI.SetSrcDir(dir); }
    bool IsEditorUIOpened() const { return m_editorUI.IsOpened(); }
    // Lets the editor guard OS initiated quits (window close, Cmd+Q, dock quit) so unsaved
    // changes can be confirmed. Returns true when the editor takes over the request.

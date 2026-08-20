@@ -11,6 +11,7 @@
 #include "core/VPApp.h"
 #include "parts/Material.h"
 #include "parts/pintable.h"
+#include "ui/live/LiveUI.h"
 #include "ui/win/WinEditor.h"
 #include "utils/BiffReader.h"
 
@@ -48,7 +49,9 @@ CComObject<PinTable>* TableBasedCommand::LoadTable()
    table->LoadGameFromFilename(m_tableFilename.string());
    if (!m_tableIniFileName.empty() && FileExists(m_tableIniFileName))
       table->SetSettingsFileName(m_tableIniFileName);
-   if (!m_projectPath.empty())
+   // A source tree is already reflected in the table that was built from it, so it is only
+   // remembered as the save target; a standalone project is applied over the table.
+   if (!m_projectPath.empty() && FileExists(m_projectPath / "project.json"))
       table->LoadProject(m_projectPath);
    return table;
 }
@@ -254,6 +257,8 @@ void LiveEditCommand::Execute()
 {
    CComObject<PinTable>* table = LoadTable();
    auto player = std::make_unique<Player>(table, Player::PlayMode::FullEdit);
+   if (!m_projectPath.empty() && FileExists(m_projectPath / "gameitems.json") && player->m_liveUI)
+      player->m_liveUI->SetEditorSrcDir(m_projectPath); // explicit source tree to save into
    player->GameLoop();
    player = nullptr;
    table->Release();
@@ -371,7 +376,7 @@ static const CommandLineOption options[] = {
    { OPTION_EXPORT_DXF, "ExportDXF"s, "[filename]  Load, export playfield geometry as DXF and close"s },
    { OPTION_INI, "Ini"s, "[filename]  Use a custom settings file instead of loading it from the default location"s },
    { OPTION_TABLE_INI, "TableIni"s, "[filename]  Use a custom table settings file. This option is only available in conjunction with a command which specifies a table filename like Play, Edit,..."s },
-   { OPTION_PROJECT, "Project"s, "[directory]  Apply a saved editor project (.vpxproj) over the loaded table"s },
+   { OPTION_PROJECT, "Project"s, "[directory]  A vpx source tree to save edits into, or a saved project (.vpxproj) to apply over the loaded table"s },
    { OPTION_TOURNAMENT, "TournamentFile"s, "[table filename] [tournament filename]  Load a table and tournament file and convert to .png"s },
    { OPTION_VERSION, "v"s, "Displays the version"s },
    { OPTION_FRONTEND_EXIT, "exit"s, ""s }, // (ab)used by frontend, not handled by us

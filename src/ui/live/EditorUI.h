@@ -28,6 +28,7 @@ public:
    void Open();
    // Native project save, and the unsaved changes guard shared by every quit path
    bool SaveProject();
+   void SetSrcDir(const std::filesystem::path &dir) { m_srcDir = dir; }
    void RequestClose(); // asks about unsaved changes, then closes
    bool ConsumeCloseRequest(); // true if a close was requested and is not blocked by the guard
    bool IsOpened() const { return m_isOpened; }
@@ -181,6 +182,7 @@ private:
    } m_units = Units::VPX;
    View2D m_view2D;
    bool m_cadMode = false; // 2D-first authoring: 3D scene hidden, 2D CAD view docked between the panels
+   std::filesystem::path m_srcDir; // explicit source tree to save into, if given on the command line
    bool m_showUnsavedChangesModal = false;
    bool m_closeRequested = false;
 
