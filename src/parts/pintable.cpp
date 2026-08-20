@@ -47,6 +47,8 @@
 #include "ui/win/WinEditor.h"
 #include "utils/BiffReader.h"
 #include "utils/JsonWriter.h"
+#include "utils/JsonReader.h"
+#include "nlohmann/json.hpp"
 #include "utils/BiffWriter.h"
 #include "utils/hash.h"
 #include "utils/objloader.h"
@@ -3372,9 +3374,17 @@ bool PinTable::SaveProject(const std::filesystem::path &dir)
 
    // one file per part, index prefixed to preserve table order
    int index = 0;
-   vector<string> partFiles;
+   struct PartEntry { string file; int type; };
+   vector<PartEntry> partFiles;
    for (IEditable *const pedit : m_vedit)
    {
+      // parts the player injects at runtime (implicit playfield mesh, VR backglass) are not
+      // part of the table's editable model and must not end up in the project
+      if (g_pplayer != nullptr && (pedit == (IEditable *)g_pplayer->m_implicitPlayfieldMesh || pedit == (IEditable *)g_pplayer->m_implicitVRBackglass))
+         continue;
+      if (pedit->GetItemType() == eItemBall)
+         continue;
+
       const string typeName = pedit->GetISelect() ? MakeString(pedit->GetISelect()->GetTypeNameForType(pedit->GetItemType())) : "Part"s;
       char prefix[8];
       snprintf(prefix, sizeof(prefix), "%04d", index);
@@ -3385,7 +3395,7 @@ bool PinTable::SaveProject(const std::filesystem::path &dir)
       pedit->Save(writer, false);
       ok &= file.good() && !writer.HasError();
 
-      partFiles.push_back(filename);
+      partFiles.push_back({ filename, (int)pedit->GetItemType() });
       index++;
    }
 
@@ -3409,7 +3419,7 @@ bool PinTable::SaveProject(const std::filesystem::path &dir)
       file << "  \"partCount\": " << partFiles.size() << ",\n";
       file << "  \"parts\": [\n";
       for (size_t i = 0; i < partFiles.size(); i++)
-         file << "    \"parts/" << partFiles[i] << '"' << (i + 1 < partFiles.size() ? "," : "") << '\n';
+         file << "    { \"file\": \"parts/" << partFiles[i].file << "\", \"type\": " << partFiles[i].type << " }" << (i + 1 < partFiles.size() ? "," : "") << '\n';
       file << "  ]\n";
       file << "}\n";
       ok &= file.good();
@@ -3425,6 +3435,85 @@ bool PinTable::SaveProject(const std::filesystem::path &dir)
       PLOGE << "Failed to write project " << dir.string();
 
    return ok;
+}
+
+bool PinTable::LoadProject(const std::filesystem::path &dir)
+{
+   const std::filesystem::path manifestPath = dir / "project.json";
+   std::ifstream manifestFile(manifestPath);
+   if (!manifestFile.is_open())
+   {
+      PLOGE << "No project manifest at " << manifestPath.string();
+      return false;
+   }
+
+   nlohmann::json manifest;
+   try
+   {
+      manifest = nlohmann::json::parse(manifestFile);
+   }
+   catch (const std::exception &e)
+   {
+      PLOGE << "Malformed project manifest: " << e.what();
+      return false;
+   }
+   if (manifest.value("format", string()) != "vpx-editor-project"s)
+   {
+      PLOGE << "Not a VPX editor project: " << manifestPath.string();
+      return false;
+   }
+
+   const int fileFormatVersion = manifest.value("fileFormatVersion", (int)CURRENT_FILE_FORMAT_VERSION);
+   const auto &parts = manifest["parts"];
+
+   // The project holds the editable model, the table file holds the assets. Parts are
+   // applied in place, matched by position and type: adding or removing parts in the
+   // editor is not round tripped yet, so mismatches are reported instead of guessed at.
+   if (parts.size() != m_vedit.size())
+   {
+      PLOGE << "Project has " << parts.size() << " parts but the table has " << m_vedit.size()
+            << ". Applying projects whose parts were added or removed is not supported yet.";
+      return false;
+   }
+   for (size_t i = 0; i < parts.size(); i++)
+      if (parts[i].value("type", -1) != (int)m_vedit[i]->GetItemType())
+      {
+         PLOGE << "Part " << i << " is a " << MakeString(m_vedit[i]->GetISelect()->GetTypeNameForType(m_vedit[i]->GetItemType())) << " in the table but the project expects type "
+               << parts[i].value("type", -1);
+         return false;
+      }
+
+   // the table itself
+   {
+      const auto reader = JsonReader::FromFile(dir / "table.json", fileFormatVersion);
+      if (!reader)
+         return false;
+      ClearForOverwrite();
+      Load(*reader);
+      if (reader->HasError())
+      {
+         PLOGE << "Errors while reading table.json";
+         return false;
+      }
+   }
+
+   for (size_t i = 0; i < parts.size(); i++)
+   {
+      const std::filesystem::path partPath = dir / parts[i].value("file", string());
+      const auto reader = JsonReader::FromFile(partPath, fileFormatVersion);
+      if (!reader)
+         return false;
+      m_vedit[i]->ClearForOverwrite();
+      m_vedit[i]->Load(*reader);
+      if (reader->HasError())
+      {
+         PLOGE << "Errors while reading " << partPath.filename().string();
+         return false;
+      }
+   }
+
+   PLOGI << "Loaded project " << dir.string() << " (" << m_vedit.size() << " parts)";
+   return true;
 }
 
 bool PinTable::ExportDXF(const string &filename)

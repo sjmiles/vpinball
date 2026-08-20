@@ -420,6 +420,8 @@ set(VPX_SOURCES
    src/utils/lzwreader.cpp
    src/utils/lzwreader.h
    src/utils/hash.h
+   src/utils/JsonReader.cpp
+   src/utils/JsonReader.h
    src/utils/JsonWriter.cpp
    src/utils/JsonWriter.h
    src/utils/objloader.cpp

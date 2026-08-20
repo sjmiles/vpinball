@@ -48,6 +48,8 @@ CComObject<PinTable>* TableBasedCommand::LoadTable()
    table->LoadGameFromFilename(m_tableFilename.string());
    if (!m_tableIniFileName.empty() && FileExists(m_tableIniFileName))
       table->SetSettingsFileName(m_tableIniFileName);
+   if (!m_projectPath.empty())
+      table->LoadProject(m_projectPath);
    return table;
 }
 
@@ -321,6 +323,7 @@ enum option_names
    OPTION_EXPORT_DXF,
    OPTION_INI,
    OPTION_TABLE_INI,
+   OPTION_PROJECT,
    OPTION_TOURNAMENT,
    OPTION_VERSION,
    OPTION_FRONTEND_EXIT,
@@ -368,6 +371,7 @@ static const CommandLineOption options[] = {
    { OPTION_EXPORT_DXF, "ExportDXF"s, "[filename]  Load, export playfield geometry as DXF and close"s },
    { OPTION_INI, "Ini"s, "[filename]  Use a custom settings file instead of loading it from the default location"s },
    { OPTION_TABLE_INI, "TableIni"s, "[filename]  Use a custom table settings file. This option is only available in conjunction with a command which specifies a table filename like Play, Edit,..."s },
+   { OPTION_PROJECT, "Project"s, "[directory]  Apply a saved editor project (.vpxproj) over the loaded table"s },
    { OPTION_TOURNAMENT, "TournamentFile"s, "[table filename] [tournament filename]  Load a table and tournament file and convert to .png"s },
    { OPTION_VERSION, "v"s, "Displays the version"s },
    { OPTION_FRONTEND_EXIT, "exit"s, ""s }, // (ab)used by frontend, not handled by us
@@ -464,6 +468,7 @@ void CommandLineProcessor::ProcessCommandLine(int nArgs, const char* szArglist[]
    g_app->SetCommandLineCustomSettingsFileName(""s);
 
    std::filesystem::path tableIniFileName;
+   std::filesystem::path projectPath;
    bool win32EditorMinimized = false;
    bool win32EditorExtMinimized = false;
    bool defaultToWin32Editor = true;
@@ -766,6 +771,16 @@ void CommandLineProcessor::ProcessCommandLine(int nArgs, const char* szArglist[]
          break;
       }
 
+      case OPTION_PROJECT:
+         if (i + 1 >= nArgs)
+         {
+            OnCommandLineError("Command Line Error"s, "Option '"s + szArglist[i] + "' must be followed by a project directory path");
+            exit(1);
+         }
+         projectPath = GetPathFromArg(szArglist[i + 1]);
+         i++;
+         break;
+
       case OPTION_TABLE_INI:
          if (i + 1 >= nArgs)
          {
@@ -842,6 +857,22 @@ void CommandLineProcessor::ProcessCommandLine(int nArgs, const char* szArglist[]
          exit(1);
       }
       tableCmd->SetTableIniFileName(tableIniFileName);
+   }
+
+   if (!projectPath.empty())
+   {
+      TableBasedCommand* const tableCmd = dynamic_cast<TableBasedCommand*>(m_command.get());
+      if (tableCmd == nullptr)
+      {
+         OnCommandLineError("Command Line Error"s, "Option '"s + options[OPTION_PROJECT].arg + "' must be used in conjunction with a command that specifies a table filename");
+         exit(1);
+      }
+      if (!DirExists(projectPath))
+      {
+         OnCommandLineError("Command Line Error"s, "Project directory '" + projectPath.string() + "' was not found");
+         exit(1);
+      }
+      tableCmd->SetProjectPath(projectPath);
    }
 }
 

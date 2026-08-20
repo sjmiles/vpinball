@@ -342,6 +342,9 @@ public:
    // written by the Windows build. Building a .vpx from a project is a separate step.
    std::filesystem::path GetProjectPath() const;
    bool SaveProject(const std::filesystem::path &dir);
+   // Applies a saved project over this (already loaded) table: the .vpx supplies images,
+   // sounds and fonts, the project supplies the editable model.
+   bool LoadProject(const std::filesystem::path &dir);
    void ImportBackdropPOV(const std::filesystem::path &filename);
    void ExportBackdropPOV() const;
 

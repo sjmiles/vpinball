@@ -27,12 +27,14 @@ class TableBasedCommand : public AppCommand
 {
 public:
    void SetTableIniFileName(const std::filesystem::path& tableIniFileName) { m_tableIniFileName = tableIniFileName; }
+   void SetProjectPath(const std::filesystem::path& projectPath) { m_projectPath = projectPath; }
 
 protected:
    explicit TableBasedCommand(const std::filesystem::path& tableFilename);
    CComObject<PinTable>* LoadTable();
 
    std::filesystem::path m_tableIniFileName;
+   std::filesystem::path m_projectPath; // editor project applied over the loaded table, if any
    const std::filesystem::path m_tableFilename;
 };
 
