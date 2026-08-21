@@ -112,6 +112,12 @@ void EditorUI::Open()
       m_cadMode = true;
    }
 
+   // pair the table's parts with the source tree now, so a part renamed during the
+   // session still saves into the file it came from instead of looking newly added
+   if (!IsInspectMode())
+      if (const std::filesystem::path srcDir = m_srcDir.empty() ? PinTable::FindSrcTree(m_table->m_filename) : m_srcDir; !srcDir.empty())
+         m_table->BindSrcTree(srcDir);
+
    ResetCameraFromPlayer();
    m_player->SetPlayState(false);
    m_renderer->DisableStaticPrePass(true);

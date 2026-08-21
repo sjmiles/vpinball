@@ -48,6 +48,7 @@
 #include "utils/BiffReader.h"
 #include "utils/JsonWriter.h"
 #include "utils/JsonReader.h"
+#include "utils/SrcWriter.h"
 #include <charconv>
 #include "nlohmann/json.hpp"
 #include "utils/BiffWriter.h"
@@ -3517,30 +3518,188 @@ bool PinTable::LoadProject(const std::filesystem::path &dir)
    return true;
 }
 
-// Shortest round trip representation of a float, matching how the source tree writes them
-// (serde f32), so patching a value that did not change produces no textual diff.
-static nlohmann::ordered_json SrcFloat(const float v)
+// The parts a source tree keeps a file for. What the player injects at runtime, and the
+// part groups VPX synthesizes from the legacy layer system, have none.
+static bool IsSrcPart(const IEditable *const pedit)
 {
-   char buf[32];
-   const auto res = std::to_chars(buf, buf + sizeof(buf) - 3, v);
-   string s(buf, res.ptr);
-   if (s.find('.') == string::npos && s.find('e') == string::npos && s.find("inf") == string::npos && s.find("nan") == string::npos)
-      s += ".0";
-   return nlohmann::ordered_json::parse(s);
+   if (g_pplayer != nullptr && (pedit == (const IEditable *)g_pplayer->m_implicitPlayfieldMesh || pedit == (const IEditable *)g_pplayer->m_implicitVRBackglass))
+      return false;
+   const ItemTypeEnum type = pedit->GetItemType();
+   return type != eItemBall && type != eItemPartGroup;
 }
 
-static IHaveDragPoints *SrcDragPoints(IEditable *edit)
+// The tree uses the file format's type names, which differ from the editor's display
+// names for a few parts.
+static string SrcTypeName(IEditable *const pedit)
 {
-   switch (edit->GetItemType())
+   switch (pedit->GetItemType())
    {
-   case eItemSurface: return static_cast<Surface *>(edit);
-   case eItemRamp: return static_cast<Ramp *>(edit);
-   case eItemRubber: return static_cast<Rubber *>(edit);
-   case eItemLight: return static_cast<Light *>(edit);
-   case eItemTrigger: return static_cast<Trigger *>(edit);
-   case eItemFlasher: return static_cast<Flasher *>(edit);
-   default: return nullptr;
+   // three parts the editor and the file format name differently
+   case eItemHitTarget: return "HitTarget"s;
+   case eItemDispReel: return "Reel"s;
+   case eItemLightSeq: return "LightSequencer"s;
+   default: return MakeString(pedit->GetISelect()->GetTypeNameForType(pedit->GetItemType()));
    }
+}
+
+// vpxtool's name for a part's file: the type, then the part name with everything that is
+// not a letter or a digit replaced, and a suffix when that collides with a file already
+// in the tree.
+static string SrcFileNameFor(const string &type, const string &name, const ankerl::unordered_dense::set<string> &taken)
+{
+   string stem = name.empty() ? "unnamed"s : name;
+   for (char &c : stem)
+      if (isalnum((unsigned char)c) == 0)
+         c = '_';
+   const string base = type + '.' + stem;
+   string candidate = base + ".json";
+   for (int counter = 1; taken.contains(lowerCase(candidate)); counter++)
+      candidate = base + "__" + std::to_string(counter) + ".json";
+   return candidate;
+}
+
+static bool WriteSrcJson(const std::filesystem::path &path, const nlohmann::ordered_json &doc)
+{
+   std::ofstream out(path, std::ios::binary);
+   out << doc.dump(2); // two space indent and no trailing newline, as the tree is written
+   if (out.good())
+      return true;
+   PLOGE << "Could not write " << path.string();
+   return false;
+}
+
+// One file in the tree's gameitems folder, with the part it belongs to once they are paired.
+struct SrcPartFile
+{
+   std::filesystem::path path;
+   nlohmann::ordered_json doc;
+   string type;
+   string declaredName;
+   size_t indexEntry = 0; // position in gameitems.json
+   IEditable *part = nullptr;
+};
+
+// Reads the tree's index and every part file it lists.
+static bool ReadSrcTree(const std::filesystem::path &srcDir, nlohmann::ordered_json &index, vector<SrcPartFile> &files)
+{
+   const std::filesystem::path indexPath = srcDir / "gameitems.json";
+   if (!DirExists(srcDir / "gameitems") || !FileExists(indexPath))
+   {
+      PLOGE << "Not a vpx source tree: " << srcDir.string();
+      return false;
+   }
+
+   try
+   {
+      std::ifstream in(indexPath);
+      index = nlohmann::ordered_json::parse(in);
+   }
+   catch (const std::exception &e)
+   {
+      PLOGE << "Malformed gameitems.json: " << e.what();
+      return false;
+   }
+   if (!index.is_array())
+   {
+      PLOGE << "gameitems.json is not a list of parts";
+      return false;
+   }
+
+   for (size_t i = 0; i < index.size(); i++)
+   {
+      const string fileName = index[i].value("file_name", string());
+      if (fileName.empty())
+      {
+         PLOGE << "Entry " << i << " of gameitems.json has no file name";
+         return false;
+      }
+      SrcPartFile file;
+      file.path = srcDir / "gameitems" / fileName;
+      file.indexEntry = i;
+      try
+      {
+         std::ifstream in(file.path);
+         file.doc = nlohmann::ordered_json::parse(in);
+      }
+      catch (const std::exception &e)
+      {
+         PLOGE << "Malformed " << fileName << ": " << e.what();
+         return false;
+      }
+      if (!file.doc.is_object() || file.doc.empty())
+      {
+         PLOGE << fileName << " does not hold a part";
+         return false;
+      }
+      file.type = file.doc.begin().key();
+      file.declaredName = file.doc[file.type].value("name", string());
+      files.push_back(std::move(file));
+   }
+   return true;
+}
+
+// Pairs each part of the table with the file it is kept in, so that later saves know
+// where a part belongs even after it is renamed. Parts and files that stay unpaired are
+// the ones that were added and removed since the tree was written.
+static void PairSrcParts(PinTable *const table, vector<SrcPartFile> &files)
+{
+   ankerl::unordered_dense::map<string, size_t> byTypeAndName;
+   for (size_t i = 0; i < files.size(); i++)
+      byTypeAndName[files[i].type + '\x1f' + files[i].declaredName] = i;
+
+   vector<IEditable *> unpaired;
+   for (IEditable *const pedit : table->GetParts())
+   {
+      if (!IsSrcPart(pedit))
+         continue;
+      const string type = SrcTypeName(pedit);
+      // a pairing made earlier in this session wins: it survives a rename
+      if (!pedit->m_srcFileName.empty())
+      {
+         const auto it = std::ranges::find_if(files, [&](const SrcPartFile &f) { return f.path.filename().string() == pedit->m_srcFileName; });
+         if (it != files.end() && it->part == nullptr && it->type == type)
+         {
+            it->part = pedit;
+            continue;
+         }
+      }
+      if (const auto found = byTypeAndName.find(type + '\x1f' + pedit->GetName()); found != byTypeAndName.end() && files[found->second].part == nullptr)
+      {
+         files[found->second].part = pedit;
+         continue;
+      }
+      unpaired.push_back(pedit);
+   }
+
+   // A part saved without a name is given a generated one when the table is loaded (old
+   // decals), so it never matches by name: give it the unnamed file of its type.
+   for (IEditable *const pedit : unpaired)
+   {
+      const string type = SrcTypeName(pedit);
+      for (SrcPartFile &file : files)
+         if (file.part == nullptr && file.type == type && file.declaredName.empty())
+         {
+            file.part = pedit;
+            break;
+         }
+   }
+
+   // Remember the pairing, and the name the part had when it was made: that is what tells
+   // a later rename apart from the name the table generated for a part saved without one.
+   for (SrcPartFile &file : files)
+      if (file.part != nullptr && file.part->m_srcFileName.empty())
+      {
+         file.part->m_srcFileName = file.path.filename().string();
+         file.part->m_srcBoundName = file.part->GetName();
+      }
+}
+
+void PinTable::BindSrcTree(const std::filesystem::path &srcDir)
+{
+   nlohmann::ordered_json index;
+   vector<SrcPartFile> files;
+   if (ReadSrcTree(srcDir, index, files))
+      PairSrcParts(this, files);
 }
 
 std::filesystem::path PinTable::FindSrcTree(const std::filesystem::path &tableFilename)
@@ -3555,156 +3714,225 @@ std::filesystem::path PinTable::FindSrcTree(const std::filesystem::path &tableFi
    return {};
 }
 
-bool PinTable::SaveToSrc(const std::filesystem::path &srcDir)
+// The mesh of a primitive lives beside its part file, named after it.
+static void RemoveSrcMeshes(const std::filesystem::path &partPath)
 {
-   if (!DirExists(srcDir / "gameitems"))
+   const std::filesystem::path dir = partPath.parent_path();
+   const string stem = partPath.stem().string();
+   std::error_code ec;
+   for (const char *const extension : { ".obj", ".glb", ".gltf", ".mtl" })
+      std::filesystem::remove(dir / (stem + extension), ec);
+   for (int frame = 0;; frame++) // animation frames, one mesh per frame
    {
-      PLOGE << "Not a vpx source tree: " << srcDir.string();
+      char suffix[16];
+      snprintf(suffix, sizeof(suffix), "_%05d.obj", frame);
+      if (!std::filesystem::remove(dir / (stem + suffix), ec))
+         break;
+   }
+}
+
+// Writes one part into the JSON of its file and its entry in the index.
+static bool WriteSrcPart(IEditable *const pedit, const string &type, nlohmann::ordered_json &doc, nlohmann::ordered_json &indexEntry,
+   const string &declaredName, const bool isNewPart, vector<string> &unmapped)
+{
+   if (!doc.contains(type))
+   {
+      PLOGE << "A " << type << " was expected in the file paired with " << pedit->GetName();
+      return false;
+   }
+   const SrcTypeFields *const fields = SrcWriter::FindType(type);
+   if (fields == nullptr)
+   {
+      PLOGE << "No field mapping for " << type << ", not saving " << pedit->GetName();
       return false;
    }
 
-   // vpxtool sanitizes part names into file names (spaces and dashes become underscores,
-   // long names are truncated), so index the tree by the name each file actually declares
-   // rather than trying to reproduce that transformation.
-   ankerl::unordered_dense::map<string, std::filesystem::path> byTypeAndName;
-   for (const auto &entry : std::filesystem::directory_iterator(srcDir / "gameitems"))
+   SrcWriter writer(doc[type], *fields, &indexEntry, isNewPart);
+   pedit->Save(writer, false);
+
+   // A part the table loaded without a name was given a generated one, and a duplicate
+   // name was made unique: neither is a rename, so the file keeps the name it declares
+   // until the part is actually renamed.
+   if (pedit->GetName() == pedit->m_srcBoundName && doc[type].contains("name"s))
    {
-      if (entry.path().extension() != ".json")
+      doc[type]["name"] = declaredName;
+   }
+
+   for (const string &tag : writer.Unwritten())
+      if (std::ranges::find(unmapped, tag) == unmapped.end())
+         unmapped.push_back(tag);
+   return true;
+}
+
+bool PinTable::SaveToSrc(const std::filesystem::path &srcDir)
+{
+   nlohmann::ordered_json index;
+   vector<SrcPartFile> files;
+   if (!ReadSrcTree(srcDir, index, files))
+      return false;
+   PairSrcParts(this, files);
+
+   ankerl::unordered_dense::set<string> takenFileNames;
+   for (const SrcPartFile &file : files)
+      takenFileNames.insert(lowerCase(file.path.filename().string()));
+
+   const nlohmann::ordered_json indexBefore = index;
+   int patched = 0, unchanged = 0, added = 0, removed = 0;
+   vector<string> unmapped;
+   bool ok = true;
+
+   // parts that have a file: patch it in place, so keys the editor knows nothing about
+   // keep their value and a save that changed nothing rewrites nothing
+   for (SrcPartFile &file : files)
+   {
+      if (file.part == nullptr)
          continue;
-      std::ifstream in(entry.path());
+      const nlohmann::ordered_json before = file.doc;
+      if (!WriteSrcPart(file.part, file.type, file.doc, index[file.indexEntry], file.declaredName, false, unmapped))
+      {
+         ok = false;
+         continue;
+      }
+      file.part->m_srcBoundName = file.part->GetName();
+      if (file.doc == before)
+         unchanged++;
+      else if (WriteSrcJson(file.path, file.doc))
+         patched++;
+      else
+         ok = false;
+   }
+
+   // parts with no file: added in the editor since the tree was written
+   for (IEditable *const pedit : m_vedit)
+   {
+      if (!IsSrcPart(pedit))
+         continue;
+      if (std::ranges::any_of(files, [pedit](const SrcPartFile &f) { return f.part == pedit; }))
+         continue;
+
+      const string type = SrcTypeName(pedit);
+      // A part file holds keys no editor field feeds (values kept only so the tree round
+      // trips), so a new one starts as a copy of another part of the same type rather than
+      // being invented from nothing.
+      const auto templateFile = std::ranges::find_if(files, [&type](const SrcPartFile &f) { return f.type == type; });
+      if (templateFile == files.end())
+      {
+         PLOGE << "Cannot add " << type << ' ' << pedit->GetName() << " to the source tree: it holds no other " << type << " to model the new file on";
+         ok = false;
+         continue;
+      }
+
+      const string fileName = SrcFileNameFor(type, pedit->GetName(), takenFileNames);
+      takenFileNames.insert(lowerCase(fileName));
+
+      nlohmann::ordered_json doc = templateFile->doc;
+      nlohmann::ordered_json entry = index[templateFile->indexEntry];
+      entry["file_name"] = fileName;
+      if (!WriteSrcPart(pedit, type, doc, entry, string(), true, unmapped))
+      {
+         ok = false;
+         continue;
+      }
+      if (!WriteSrcJson(srcDir / "gameitems" / fileName, doc))
+      {
+         ok = false;
+         continue;
+      }
+      index.push_back(entry);
+      pedit->m_srcFileName = fileName;
+      pedit->m_srcBoundName = pedit->GetName();
+      added++;
+      if (pedit->GetItemType() == eItemPrimitive && static_cast<Primitive *>(pedit)->m_d.m_use3DMesh)
+      {
+         PLOGW << "The mesh of the added primitive " << pedit->GetName() << " was not written; the tree keeps meshes in .obj files beside the part";
+      }
+   }
+
+   // files with no part: removed in the editor since the tree was written
+   for (const SrcPartFile &file : files)
+   {
+      if (file.part != nullptr)
+         continue;
+      std::error_code ec;
+      std::filesystem::remove(file.path, ec);
+      RemoveSrcMeshes(file.path);
+      const string fileName = file.path.filename().string();
+      for (size_t i = 0; i < index.size(); i++)
+         if (index[i].value("file_name", string()) == fileName)
+         {
+            index.erase(i);
+            break;
+         }
+      removed++;
+   }
+
+   if (index != indexBefore && !WriteSrcJson(srcDir / "gameitems.json", index))
+      ok = false;
+
+   // the table's own properties, which the tree keeps beside the parts, and its script
+   bool tableChanged = false;
+   if (const SrcTypeFields *const tableFields = SrcWriter::FindType("GameData"s); tableFields != nullptr && FileExists(srcDir / "gamedata.json"))
+   {
       nlohmann::ordered_json doc;
       try
       {
+         std::ifstream in(srcDir / "gamedata.json");
          doc = nlohmann::ordered_json::parse(in);
       }
-      catch (const std::exception &)
+      catch (const std::exception &e)
       {
-         continue;
+         PLOGE << "Malformed gamedata.json: " << e.what();
+         ok = false;
       }
-      if (!doc.is_object() || doc.empty())
-         continue;
-      const string type = doc.begin().key();
-      const string name = doc[type].value("name", string());
-      byTypeAndName[type + '\x1f' + name] = entry.path();
+      if (doc.is_object())
+      {
+         const nlohmann::ordered_json before = doc;
+         SrcWriter writer(doc, *tableFields, nullptr);
+         Save(writer, false); // not the undo form: that one deliberately leaves the script out
+         for (const string &tag : writer.Unwritten())
+            if (tag != "CODE" && std::ranges::find(unmapped, tag) == unmapped.end())
+               unmapped.push_back(tag); // the script is written to script.vbs below
+         if (doc != before)
+         {
+            tableChanged = WriteSrcJson(srcDir / "gamedata.json", doc);
+            ok &= tableChanged;
+         }
+      }
    }
-
-   int patched = 0, unchanged = 0;
-   vector<string> missing;
-   ankerl::unordered_dense::set<string> unnamedUsed;
-
-   for (IEditable *const pedit : m_vedit)
+   if (const std::filesystem::path scriptPath = srcDir / "script.vbs"; FileExists(scriptPath))
    {
-      // parts the player injects at runtime, and the part groups VPX synthesizes from the
-      // legacy layer system, have no file in the source tree
-      if (g_pplayer != nullptr && (pedit == (IEditable *)g_pplayer->m_implicitPlayfieldMesh || pedit == (IEditable *)g_pplayer->m_implicitVRBackglass))
-         continue;
-      if (pedit->GetItemType() == eItemBall || pedit->GetItemType() == eItemPartGroup)
-         continue;
-
-      // the source tree uses the file format's type names, which differ from the editor's
-      // display names for a few parts
-      const string typeName = (pedit->GetItemType() == eItemHitTarget) ? "HitTarget"s
-                                                                      : MakeString(pedit->GetISelect()->GetTypeNameForType(pedit->GetItemType()));
-      const string name = pedit->GetName();
-      auto found = byTypeAndName.find(typeName + '\x1f' + name);
-      if (found == byTypeAndName.end())
+      // the tree keeps the script as its own file rather than a field of gamedata.json
+      std::ifstream in(scriptPath, std::ios::binary);
+      const string current((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+      if (current != m_script_text)
       {
-         // parts saved without a name (decals) are given a generated one at load time, so
-         // fall back to the unnamed file of that type when there is exactly one
-         found = byTypeAndName.find(typeName + '\x1f');
-         if (found == byTypeAndName.end() || unnamedUsed.count(typeName) != 0)
+         std::ofstream out(scriptPath, std::ios::binary);
+         out << m_script_text;
+         if (out.good())
+            tableChanged = true;
+         else
          {
-            missing.push_back(typeName + '.' + (name.empty() ? "unnamed"s : name));
-            continue;
-         }
-         unnamedUsed.insert(typeName);
-      }
-      const std::filesystem::path file = found->second;
-
-      nlohmann::ordered_json doc;
-      {
-         std::ifstream in(file);
-         try
-         {
-            doc = nlohmann::ordered_json::parse(in);
-         }
-         catch (const std::exception &e)
-         {
-            PLOGE << "Malformed " << file.filename().string() << ": " << e.what();
-            return false;
+            PLOGE << "Could not write " << scriptPath.string();
+            ok = false;
          }
       }
-      if (!doc.contains(typeName))
-      {
-         PLOGE << file.filename().string() << " does not hold a " << typeName;
-         return false;
-      }
-      nlohmann::ordered_json &part = doc[typeName];
-      const nlohmann::ordered_json before = part;
-
-      if (const IHaveDragPoints *const dragPts = SrcDragPoints(pedit); dragPts != nullptr && part.contains("drag_points"))
-      {
-         nlohmann::ordered_json points = nlohmann::ordered_json::array();
-         for (size_t i = 0; i < dragPts->m_vdpoint.size(); i++)
-         {
-            const DragPoint *const dp = dragPts->m_vdpoint[i];
-            // keep the editor bookkeeping of the point it replaces, so only geometry moves
-            nlohmann::ordered_json point = (i < part["drag_points"].size()) ? part["drag_points"][i] : nlohmann::ordered_json::object();
-            point["x"] = SrcFloat(dp->m_v.x);
-            point["y"] = SrcFloat(dp->m_v.y);
-            point["z"] = SrcFloat(dp->m_v.z);
-            point["smooth"] = dp->m_smooth;
-            point["is_slingshot"] = dp->m_slingshot;
-            point["has_auto_texture"] = dp->m_autoTexture;
-            point["tex_coord"] = SrcFloat(dp->m_texturecoord);
-            if (!point.contains("is_locked"))
-               point["is_locked"] = false;
-            if (!point.contains("editor_layer"))
-               point["editor_layer"] = 0;
-            if (!point.contains("editor_layer_name"))
-               point["editor_layer_name"] = "";
-            if (!point.contains("editor_layer_visibility"))
-               point["editor_layer_visibility"] = true;
-            points.push_back(point);
-         }
-         part["drag_points"] = points;
-      }
-
-      if (part.contains("center") && part["center"].is_object())
-      {
-         const Vertex2D center = pedit->GetISelect()->GetCenter();
-         part["center"]["x"] = SrcFloat(center.x);
-         part["center"]["y"] = SrcFloat(center.y);
-      }
-
-      if (part == before)
-      {
-         unchanged++;
-         continue;
-      }
-
-      std::ofstream out(file);
-      out << doc.dump(2);
-      if (!out.good())
-      {
-         PLOGE << "Could not write " << file.string();
-         return false;
-      }
-      patched++;
    }
 
-   PLOGI << "Wrote " << patched << " changed part" << (patched == 1 ? "" : "s") << " to " << srcDir.string() << " (" << unchanged << " unchanged)";
-   for (const string &m : missing)
-      PLOGW << "No source file for part, not written: " << m;
-   if (!missing.empty())
-      PLOGW << missing.size() << " part(s) had no file in the source tree; adding and removing parts is not written back yet";
-
-   if (patched > 0)
+   PLOGI << "Saved to " << srcDir.string() << ": " << patched << " changed, " << unchanged << " unchanged, " << added << " added, " << removed << " removed"
+         << (tableChanged ? ", table updated" : ", table unchanged");
+   if (!unmapped.empty())
+   {
+      string tags;
+      for (const string &tag : unmapped)
+         tags += (tags.empty() ? ""s : ", "s) + tag;
+      PLOGW << "The source tree has no field for these, so edits to them are not saved: " << tags;
+   }
+   if (ok)
    {
       m_undo.SetCleanPoint(eSaveClean);
       SetNonUndoableDirty(eSaveClean);
    }
-   return missing.empty();
+   return ok;
 }
 
 bool PinTable::ExportDXF(const string &filename)

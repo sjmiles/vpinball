@@ -424,6 +424,9 @@ set(VPX_SOURCES
    src/utils/JsonReader.h
    src/utils/JsonWriter.cpp
    src/utils/JsonWriter.h
+   src/utils/SrcFieldMap.h
+   src/utils/SrcWriter.cpp
+   src/utils/SrcWriter.h
    src/utils/objloader.cpp
    src/utils/objloader.h
    src/utils/Logger.cpp

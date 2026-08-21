@@ -163,6 +163,25 @@ void ExportDXFCommand::Execute()
 }
 
 
+SaveToSrcCommand::SaveToSrcCommand(const std::filesystem::path& tableFilename)
+   : TableBasedCommand(tableFilename)
+{
+}
+
+void SaveToSrcCommand::Execute()
+{
+   CComObject<PinTable>* table = LoadTable();
+   const std::filesystem::path srcDir = m_projectPath.empty() ? PinTable::FindSrcTree(m_tableFilename) : m_projectPath;
+   if (srcDir.empty())
+      std::cout << "No vpx source tree found for " << m_tableFilename.string() << ", use -Project to name one\n";
+   else if (table->SaveToSrc(srcDir))
+      std::cout << "Saved " << m_tableFilename.filename().string() << " into " << srcDir.string() << '\n';
+   else
+      std::cout << "Saving " << m_tableFilename.filename().string() << " into " << srcDir.string() << " failed\n";
+   table->Release();
+}
+
+
 PlayTableCommand::PlayTableCommand(const std::filesystem::path& tableFilename)
    : TableBasedCommand(tableFilename)
 {
@@ -326,6 +345,7 @@ enum option_names
    OPTION_POV,
    OPTION_EXTRACTVBS,
    OPTION_EXPORT_DXF,
+   OPTION_SAVE_TO_SRC,
    OPTION_INI,
    OPTION_TABLE_INI,
    OPTION_PROJECT,
@@ -374,6 +394,7 @@ static const CommandLineOption options[] = {
    { OPTION_POV, "Pov"s, "[filename]  Load, export pov and close"s },
    { OPTION_EXTRACTVBS, "ExtractVBS"s, "[filename]  Load, export table script and close"s },
    { OPTION_EXPORT_DXF, "ExportDXF"s, "[filename]  Load, export playfield geometry as DXF and close"s },
+   { OPTION_SAVE_TO_SRC, "SaveToSrc"s, "[filename]  Load, write the table back into its vpx source tree and close"s },
    { OPTION_INI, "Ini"s, "[filename]  Use a custom settings file instead of loading it from the default location"s },
    { OPTION_TABLE_INI, "TableIni"s, "[filename]  Use a custom table settings file. This option is only available in conjunction with a command which specifies a table filename like Play, Edit,..."s },
    { OPTION_PROJECT, "Project"s, "[directory]  A vpx source tree to save edits into, or a saved project (.vpxproj) to apply over the loaded table"s },
@@ -661,6 +682,7 @@ void CommandLineProcessor::ProcessCommandLine(int nArgs, const char* szArglist[]
       case OPTION_POV:
       case OPTION_EXTRACTVBS:
       case OPTION_EXPORT_DXF:
+      case OPTION_SAVE_TO_SRC:
       #ifndef __STANDALONE__
          case OPTION_EDIT:
       #endif
@@ -693,6 +715,7 @@ void CommandLineProcessor::ProcessCommandLine(int nArgs, const char* szArglist[]
             case OPTION_POV: commands.push_back(std::make_unique<ExportPOVCommand>(tableFileName)); break;
             case OPTION_EXTRACTVBS: commands.push_back(std::make_unique<ExportVBSCommand>(tableFileName)); break;
             case OPTION_EXPORT_DXF: commands.push_back(std::make_unique<ExportDXFCommand>(tableFileName)); break;
+            case OPTION_SAVE_TO_SRC: commands.push_back(std::make_unique<SaveToSrcCommand>(tableFileName)); break;
             #ifndef __STANDALONE__
             case OPTION_EDIT: commands.push_back(std::make_unique<Win32EditCommand>(tableFileName)); break;
             #endif

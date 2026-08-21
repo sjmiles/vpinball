@@ -273,6 +273,14 @@ protected:
 public:
    wstring m_onLoadExpectedPartGroup; // Name of the part group, this object expects to be added to. Defined when loading a part (should be moved to the loading context)
 
+   // The file this part is kept in inside a vpx source tree, once PinTable has paired the
+   // two up, and the name the part had when that pairing was made. Held here so the
+   // pairing survives a rename: the part keeps its file instead of the rename reading as
+   // one part deleted and another added, and the bound name says whether a rename happened
+   // at all (a part saved without a name is given a generated one when the table loads).
+   string m_srcFileName;
+   string m_srcBoundName;
+
    virtual void BeginUndo();
    virtual void EndUndo();
    virtual void Delete();

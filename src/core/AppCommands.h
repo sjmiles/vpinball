@@ -62,6 +62,16 @@ public:
    void Execute() override;
 };
 
+// Loads a table and writes it into its vpx source tree, the same save the live editor
+// does, so that the round trip can be exercised without a window.
+class SaveToSrcCommand : public TableBasedCommand
+{
+public:
+   explicit SaveToSrcCommand(const std::filesystem::path& tableFilename);
+   ~SaveToSrcCommand() override = default;
+   void Execute() override;
+};
+
 class PlayTableCommand : public TableBasedCommand
 {
 public:

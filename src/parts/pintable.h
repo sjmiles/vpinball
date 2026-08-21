@@ -349,6 +349,9 @@ public:
    // source of truth; the .vpx is only ever an output built from it by vpxtool assemble.
    // Returns false and reports if parts could not be matched to files.
    bool SaveToSrc(const std::filesystem::path &srcDir);
+   // Pairs the table's parts with the files of a source tree up front, so that a part
+   // renamed during the session still saves into the file it came from.
+   void BindSrcTree(const std::filesystem::path &srcDir);
    static std::filesystem::path FindSrcTree(const std::filesystem::path &tableFilename);
    void ImportBackdropPOV(const std::filesystem::path &filename);
    void ExportBackdropPOV() const;
