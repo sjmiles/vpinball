@@ -316,7 +316,9 @@ Player::Player(PinTable *const table, const PlayMode playMode)
       else
       {
          const bool authoring = (playMode == PlayMode::FullEdit);
-         m_playfieldWnd = new VPX::Window(authoring ? "Visual Pinball Editor"s : "Visual Pinball Player"s, settings, VPXWindowId::VPXWINDOW_Playfield, authoring);
+         const bool decorated = authoring
+            || (settings.GetWindow_FullScreen(VPXWindowId::VPXWINDOW_Playfield) == (int)VPX::Window::WindowMode::Windowed && settings.GetPlayer_PlayfieldDecorated());
+         m_playfieldWnd = new VPX::Window(authoring ? "Visual Pinball Editor"s : "Visual Pinball Player"s, settings, VPXWindowId::VPXWINDOW_Playfield, decorated);
 
          const float pfRefreshRate = m_playfieldWnd->GetRefreshRate();
          m_maxFramerate = m_ptable->m_settings.GetPlayer_MaxFramerate();
