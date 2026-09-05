@@ -1500,8 +1500,9 @@ RenderDevice::RenderDevice(
 
    SetRenderState(RenderState::ZFUNC, RenderState::Z_LESSEQUAL);
 
-   // Retrieve a reference to the back buffer.
-   wnd->SetBackBuffer(new RenderTarget(this, SurfaceType::RT_DEFAULT, wnd->GetWidth(), wnd->GetHeight(), back_buffer_format));
+   // Retrieve a reference to the back buffer. The default framebuffer is sized in pixels, which differs
+   // from the window's logical size on high DPI displays (e.g. macOS Retina)
+   wnd->SetBackBuffer(new RenderTarget(this, SurfaceType::RT_DEFAULT, wnd->GetPixelWidth(), wnd->GetPixelHeight(), back_buffer_format));
 
 #elif defined(ENABLE_DX9)
    ///////////////////////////////////
@@ -2255,7 +2256,14 @@ void RenderDevice::Flip()
    #elif defined(ENABLE_OPENGL)
    SDL_GL_SwapWindow(m_outputWnd[0]->GetCore());
    if (!m_isVR)
+   {
       g_pplayer->m_logicProfiler.OnPresented(usec());
+      // Follow window resizes: the default framebuffer tracks the window's pixel size (see Window::OnResized)
+      VPX::Window* const wnd = m_outputWnd[0];
+      RenderTarget* const backBuffer = wnd->GetBackBuffer();
+      if (backBuffer != nullptr && (backBuffer->GetWidth() != wnd->GetPixelWidth() || backBuffer->GetHeight() != wnd->GetPixelHeight()))
+         backBuffer->SetSize(wnd->GetPixelWidth(), wnd->GetPixelHeight());
+   }
    if (m_screenshotFrameDelay > 0)
       CaptureGLScreenshot();
 

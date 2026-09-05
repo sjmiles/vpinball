@@ -2734,6 +2734,48 @@ RenderTarget* Renderer::ApplyUpscaling(RenderTarget* renderedRT, RenderTarget* o
    return outputRT;
 }
 
+RenderTarget* Renderer::ApplyLetterbox(RenderTarget* renderedRT, RenderTarget* outputBackBuffer)
+{
+   // The output window has been resized to an aspect ratio that differs from the rendered frame (desktop windowed mode):
+   // keep the rendered aspect ratio by centering the frame in the output with black borders (top/bottom or left/right)
+   assert(outputBackBuffer != nullptr);
+   assert(renderedRT != outputBackBuffer);
+
+   m_renderDevice->ResetRenderState();
+   m_renderDevice->SetRenderState(RenderState::ALPHABLENDENABLE, RenderState::RS_FALSE);
+   m_renderDevice->SetRenderState(RenderState::CULLMODE, RenderState::CULL_NONE);
+   m_renderDevice->SetRenderState(RenderState::ZWRITEENABLE, RenderState::RS_FALSE);
+   m_renderDevice->SetRenderState(RenderState::ZENABLE, RenderState::RS_FALSE);
+
+   m_renderDevice->SetRenderTarget("Letterbox"s, outputBackBuffer, false);
+   m_renderDevice->AddRenderTargetDependency(renderedRT);
+   m_renderDevice->Clear(clearType::TARGET, 0x00000000);
+
+   const float renderAR = static_cast<float>(renderedRT->GetWidth()) / static_cast<float>(renderedRT->GetHeight());
+   const float outputAR = static_cast<float>(outputBackBuffer->GetWidth()) / static_cast<float>(outputBackBuffer->GetHeight());
+   float sx = 1.f, sy = 1.f;
+   if (outputAR > renderAR)
+      sx = renderAR / outputAR; // wider output: side borders
+   else
+      sy = outputAR / renderAR; // taller output: top/bottom borders
+   // Snap to whole output pixels so the frame is not resampled at a fractional offset
+   const float halfW = static_cast<float>((int)(sx * static_cast<float>(outputBackBuffer->GetWidth()) * 0.5f)) / (0.5f * static_cast<float>(outputBackBuffer->GetWidth()));
+   const float halfH = static_cast<float>((int)(sy * static_cast<float>(outputBackBuffer->GetHeight()) * 0.5f)) / (0.5f * static_cast<float>(outputBackBuffer->GetHeight()));
+
+   const Vertex3D_TexelOnly verts[4] =
+   {
+      { -halfW,  halfH, 0.0f, 0.f, 0.f },
+      {  halfW,  halfH, 0.0f, 1.f, 0.f },
+      { -halfW, -halfH, 0.0f, 0.f, 1.f },
+      {  halfW, -halfH, 0.0f, 1.f, 1.f }
+   };
+   m_renderDevice->m_FBShader->SetTechnique(SHADER_TECHNIQUE_fb_mirror);
+   m_renderDevice->m_FBShader->SetVector(SHADER_w_h_height, 1.f, 1.f, 1.f, 1.f);
+   m_renderDevice->m_FBShader->SetTexture(SHADER_tex_fb_unfiltered, renderedRT->GetColorSampler(), SamplerFilter::SF_BILINEAR);
+   m_renderDevice->DrawTexturedQuad(m_renderDevice->m_FBShader, verts);
+   return outputBackBuffer;
+}
+
 RenderTarget* Renderer::ApplyStereo(RenderTarget* renderedRT, RenderTarget* outputBackBuffer)
 {
    // Always applied as the last pass
@@ -3026,22 +3068,31 @@ void Renderer::RenderFrame()
    #else
    const bool hasStereoPass = m_stereo3Denabled && (m_stereo3D != STEREO_OFF);
    #endif
+   // Keep the rendered aspect ratio if the output window was resized to a different one (desktop windowed mode). Not supported with stereo which owns the last pass
+   bool hasLetterboxPass = false;
+   if (!hasStereoPass && m_stereo3D != STEREO_VR)
+   {
+      const RenderTarget* const outputBB = m_renderDevice->GetOutputBackBuffer();
+      const float renderAR = static_cast<float>(GetBackBufferTexture()->GetWidth()) / static_cast<float>(GetBackBufferTexture()->GetHeight());
+      const float outputAR = static_cast<float>(outputBB->GetWidth()) / static_cast<float>(outputBB->GetHeight());
+      hasLetterboxPass = fabsf(renderAR - outputAR) > 0.002f;
+   }
 
    // Perform color grade LUT / dither / tonemapping, also applying bloom and AO
    RenderTarget* const tonemapRT
-      = ApplyTonemapping(renderedRT, (hasAntialiasPass || hasSharpenPass || hasStereoPass || hasUpscalerPass) ? GetPostProcessRenderTarget1() : m_renderDevice->GetOutputBackBuffer());
+      = ApplyTonemapping(renderedRT, (hasAntialiasPass || hasSharpenPass || hasStereoPass || hasUpscalerPass || hasLetterboxPass) ? GetPostProcessRenderTarget1() : m_renderDevice->GetOutputBackBuffer());
 
    // Raytraced ball motion blur (BGFX only)
    renderedRT = ApplyBallMotionBlur(renderedRT, tonemapRT);
 
    // Perform post processed anti aliasing
-   renderedRT = ApplyPostProcessedAntialiasing(renderedRT, (hasSharpenPass || hasStereoPass || hasUpscalerPass) ? nullptr : m_renderDevice->GetOutputBackBuffer());
+   renderedRT = ApplyPostProcessedAntialiasing(renderedRT, (hasSharpenPass || hasStereoPass || hasUpscalerPass || hasLetterboxPass) ? nullptr : m_renderDevice->GetOutputBackBuffer());
 
    // Performs sharpening
-   renderedRT = ApplySharpening(renderedRT, (hasStereoPass || hasUpscalerPass) ? nullptr : m_renderDevice->GetOutputBackBuffer());
+   renderedRT = ApplySharpening(renderedRT, (hasStereoPass || hasUpscalerPass || hasLetterboxPass) ? nullptr : m_renderDevice->GetOutputBackBuffer());
 
    // Upscale: When using downscaled backbuffer (for performance reason), upscaling is done after postprocessing
-   renderedRT = ApplyUpscaling(renderedRT, hasStereoPass ? nullptr : m_renderDevice->GetOutputBackBuffer());
+   renderedRT = ApplyUpscaling(renderedRT, (hasStereoPass || hasLetterboxPass) ? nullptr : m_renderDevice->GetOutputBackBuffer());
 
    // If using OpenVR, render LiveUI before pushing eyes to headset
    // If using 3D TV stereo mode, render LiveUI before stereo as it must be duplicated per view to be correct
@@ -3055,6 +3106,10 @@ void Renderer::RenderFrame()
 
    // Apply stereo
    renderedRT = ApplyStereo(renderedRT, m_renderDevice->GetOutputBackBuffer());
+
+   // Center the frame in a resized output window, keeping its aspect ratio
+   if (hasLetterboxPass)
+      renderedRT = ApplyLetterbox(renderedRT, m_renderDevice->GetOutputBackBuffer());
 
    if (!uiBeforeStero)
    {
