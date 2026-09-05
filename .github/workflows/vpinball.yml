@@ -135,6 +135,11 @@ jobs:
             ]}'
             ANDROID_FLAVORS='["mobile"]'
           fi
+          # Fork: only the macOS arm64 players are needed. The other platform jobs are skipped with a job-level 'if: false'.
+          DESKTOP='{"include":[
+            {"os":"macos-15","type":"GL","platform":"macos","arch":"arm64","config":"Release"},
+            {"os":"macos-15","type":"BGFX","platform":"macos","arch":"arm64","config":"Release"}
+          ]}'
           echo "desktop=$(echo "$DESKTOP" | jq -c .)" >> $GITHUB_OUTPUT
           echo "dx=$(echo "$DX" | jq -c .)" >> $GITHUB_OUTPUT
           echo "sbc=$(echo "$SBC" | jq -c .)" >> $GITHUB_OUTPUT
@@ -321,6 +326,7 @@ jobs:
           archive: false
 
   build-dx:
+    if: false # fork: macOS arm64 only
     name: Build VPinballX-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.config }}
     runs-on: windows-2025-vs2026
     needs: [ context, version, matrix ]
@@ -404,6 +410,7 @@ jobs:
           archive: false
 
   build-sbc:
+    if: false # fork: macOS arm64 only
     name: Build VPinballX_${{ matrix.type }}-${{ matrix.board }}-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.config }}
     runs-on: ${{ matrix.os }}
     needs: [ context, version, matrix ]
@@ -479,6 +486,7 @@ jobs:
           archive: false
 
   build-ios:
+    if: false # fork: macOS arm64 only
     name: Build VPinballX_BGFX-ios-${{ matrix.config }}
     runs-on: macos-15
     needs: [ context, version ]
@@ -552,6 +560,7 @@ jobs:
           archive: false
 
   build-android:
+    if: false # fork: macOS arm64 only
     name: Build VPinballX_BGFX-android-${{ matrix.flavor }}-${{ matrix.config }}
     runs-on: ubuntu-24.04
     needs: [ context, version, matrix ]
